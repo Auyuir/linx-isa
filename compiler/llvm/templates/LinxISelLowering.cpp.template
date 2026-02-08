@@ -1,0 +1,268 @@
+//===-- LinxISelLowering.cpp - Linx DAG Lowering Implementation ----------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file implements the LinxTargetLowering class.
+//
+//===----------------------------------------------------------------------===//
+
+#include "LinxISelLowering.h"
+#include "LinxMachineFunctionInfo.h"
+#include "LinxSubtarget.h"
+#include "LinxTargetMachine.h"
+#include "llvm/CodeGen/CallingConvLower.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/SelectionDAG.h"
+#include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
+#include "llvm/IR/Function.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetMachine.h"
+
+using namespace llvm;
+
+#define DEBUG_TYPE "linx-lower"
+
+//===----------------------------------------------------------------------===//
+// TargetLowering Implementation
+//===----------------------------------------------------------------------===//
+
+LinxTargetLowering::LinxTargetLowering(const TargetMachine &TM,
+                                       const LinxSubtarget &STI)
+    : TargetLowering(TM), Subtarget(STI) {
+
+  // Set up the register classes
+  addRegisterClass(MVT::i32, &Linx::GPRRegClass);
+  addRegisterClass(MVT::i64, &Linx::GPR64RegClass);
+
+  // Compute derived properties
+  computeRegisterProperties(STI.getRegisterInfo());
+
+  // Set operation actions for integer operations
+  setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
+  setOperationAction(ISD::GlobalAddress, MVT::i64, Custom);
+  setOperationAction(ISD::ConstantPool, MVT::i32, Custom);
+  setOperationAction(ISD::ConstantPool, MVT::i64, Custom);
+
+  // Block ISA: Lower branches to BSTART
+  setOperationAction(ISD::BRCOND, MVT::Other, Custom);
+  setOperationAction(ISD::BR, MVT::Other, Custom);
+
+  // Function calls
+  setOperationAction(ISD::CALL, MVT::Other, Custom);
+  setOperationAction(ISD::RET, MVT::Other, Custom);
+
+  // Stack operations
+  setStackPointerRegisterToSaveReg(Linx::SP);
+
+  // Exception handling
+  setExceptionPointerRegister(Linx::A0);
+  setExceptionSelectorRegister(Linx::A1);
+
+  //===----------------------------------------------------------------------===//
+  // Floating Point Operations - Fixed for libcall support
+  //===----------------------------------------------------------------------===//
+
+  // For floating point operations, we need to set them to Expand to allow
+  // libcall generation. Without this, we get "unsupported library call operation"
+  // errors when trying to compile floating point code.
+
+  // 32-bit floating point operations
+  setOperationAction(ISD::FADD, MVT::f32, Expand);
+  setOperationAction(ISD::FSUB, MVT::f32, Expand);
+  setOperationAction(ISD::FMUL, MVT::f32, Expand);
+  setOperationAction(ISD::FDIV, MVT::f32, Expand);
+  setOperationAction(ISD::FREM, MVT::f32, Expand);
+  setOperationAction(ISD::FNEG, MVT::f32, Expand);
+  setOperationAction(ISD::FABS, MVT::f32, Expand);
+  setOperationAction(ISD::FSQRT, MVT::f32, Expand);
+  setOperationAction(ISD::FCOPYSIGN, MVT::f32, Expand);
+  setOperationAction(ISD::FCMP, MVT::f32, Expand);
+  setOperationAction(ISD::FEXP2, MVT::f32, Expand);
+  setOperationAction(ISD::FLOG2, MVT::f32, Expand);
+
+  // 64-bit floating point operations
+  setOperationAction(ISD::FADD, MVT::f64, Expand);
+  setOperationAction(ISD::FSUB, MVT::f64, Expand);
+  setOperationAction(ISD::FMUL, MVT::f64, Expand);
+  setOperationAction(ISD::FDIV, MVT::f64, Expand);
+  setOperationAction(ISD::FREM, MVT::f64, Expand);
+  setOperationAction(ISD::FNEG, MVT::f64, Expand);
+  setOperationAction(ISD::FABS, MVT::f64, Expand);
+  setOperationAction(ISD::FSQRT, MVT::f64, Expand);
+  setOperationAction(ISD::FCOPYSIGN, MVT::f64, Expand);
+  setOperationAction(ISD::FCMP, MVT::f64, Expand);
+  setOperationAction(ISD::FEXP2, MVT::f64, Expand);
+  setOperationAction(ISD::FLOG2, MVT::f64, Expand);
+
+  // Float-to-int conversions
+  setOperationAction(ISD::FP_TO_SINT, MVT::i32, Expand);
+  setOperationAction(ISD::FP_TO_UINT, MVT::i32, Expand);
+  setOperationAction(ISD::FP_TO_SINT, MVT::i64, Expand);
+  setOperationAction(ISD::FP_TO_UINT, MVT::i64, Expand);
+
+  // Int-to-float conversions
+  setOperationAction(ISD::SINT_TO_FP, MVT::f32, Expand);
+  setOperationAction(ISD::UINT_TO_FP, MVT::f32, Expand);
+  setOperationAction(ISD::SINT_TO_FP, MVT::f64, Expand);
+  setOperationAction(ISD::UINT_TO_FP, MVT::f64, Expand);
+
+  // Float-to-float conversions
+  setOperationAction(ISD::FP_ROUND, MVT::f32, Expand);
+  setOperationAction(ISD::FP_EXTEND, MVT::f64, Expand);
+
+  // FMA (fused multiply-add) - expand to separate mul+add
+  setOperationAction(ISD::FMA, MVT::f32, Expand);
+  setOperationAction(ISD::FMA, MVT::f64, Expand);
+
+  // Set preferred vector types (none for now, using scalars)
+  setPreferredVectorDemotionLaw(true);
+  setVectorInsertExtractUnpreferred(true);
+}
+
+SDValue LinxTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
+  switch (Op.getOpcode()) {
+  case ISD::GlobalAddress:
+    return LowerGlobalAddress(Op, DAG);
+  case ISD::ConstantPool:
+    return LowerConstantPool(Op, DAG);
+  case ISD::BRCOND:
+    return LowerBRCOND(Op, DAG);
+  case ISD::BR:
+    return LowerBR(Op, DAG);
+  case ISD::CALL:
+    return LowerCALL(Op, DAG);
+  case ISD::RET:
+    return LowerRET(Op, DAG);
+  default:
+    llvm_unreachable("Unimplemented operation");
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// Global Address Lowering
+//===----------------------------------------------------------------------===//
+
+SDValue LinxTargetLowering::LowerGlobalAddress(SDValue Op,
+                                                SelectionDAG &DAG) const {
+  EVT Ty = Op.getValueType();
+  GlobalAddressSDNode *N = cast<GlobalAddressSDNode>(Op);
+  const GlobalValue *GV = N->getGlobal();
+  int64_t Offset = N->getOffset();
+  
+  SDLoc DL(Op);
+  
+  // Use PC-relative load (LDL) for global addresses
+  SDValue TargetAddr = DAG.getTargetGlobalAddress(GV, DL, Ty, Offset);
+  return DAG.getNode(LinxISD::PCREL, DL, Ty, TargetAddr);
+}
+
+//===----------------------------------------------------------------------===//
+// Constant Pool Lowering
+//===----------------------------------------------------------------------===//
+
+SDValue LinxTargetLowering::LowerConstantPool(SDValue Op,
+                                               SelectionDAG &DAG) const {
+  ConstantPoolSDNode *N = cast<ConstantPoolSDNode>(Op);
+  EVT Ty = Op.getValueType();
+  SDLoc DL(Op);
+  
+  SDValue CPAddr = DAG.getTargetConstantPool(N->getConstVal(), Ty,
+                                             N->getAlignment(),
+                                             N->getOffset());
+  return DAG.getNode(LinxISD::PCREL, DL, Ty, CPAddr);
+}
+
+//===----------------------------------------------------------------------===//
+// Branch Lowering (Block ISA)
+//===----------------------------------------------------------------------===//
+
+SDValue LinxTargetLowering::LowerBRCOND(SDValue Op, SelectionDAG &DAG) const {
+  SDValue Chain = Op.getOperand(0);
+  SDValue Cond = Op.getOperand(1);
+  SDValue Dest = Op.getOperand(2);
+  SDLoc DL(Op);
+  
+  // Lower conditional branch to SETC + BSTART.COND
+  // First, set condition using SETC
+  SDValue SetC = DAG.getNode(LinxISD::SETC, DL, MVT::Other, Chain, Cond);
+  
+  // Then emit BSTART.COND
+  return DAG.getNode(LinxISD::BSTART_COND, DL, MVT::Other, SetC, Dest);
+}
+
+SDValue LinxTargetLowering::LowerBR(SDValue Op, SelectionDAG &DAG) const {
+  SDValue Chain = Op.getOperand(0);
+  SDValue Dest = Op.getOperand(1);
+  SDLoc DL(Op);
+  
+  // Lower unconditional branch to BSTART.DIRECT
+  return DAG.getNode(LinxISD::BSTART_DIRECT, DL, MVT::Other, Chain, Dest);
+}
+
+//===----------------------------------------------------------------------===//
+// Call Lowering
+//===----------------------------------------------------------------------===//
+
+SDValue LinxTargetLowering::LowerCALL(SDValue Op, SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  SDValue Chain = Op.getOperand(0);
+  SDValue Callee = Op.getOperand(1);
+  
+  // Lower call to BSTART.CALL
+  // Save return address using ADDPC
+  SDValue RetAddr = DAG.getNode(LinxISD::ADDPC, DL, MVT::i64);
+  
+  // Store return address to RA register
+  SDValue StoreRA = DAG.getStore(Chain, DL, RetAddr,
+                                 DAG.getRegister(Linx::RA, MVT::i64),
+                                 MachinePointerInfo());
+  
+  // Emit BSTART.CALL
+  return DAG.getNode(LinxISD::BSTART_CALL, DL, MVT::Other, StoreRA, Callee);
+}
+
+//===----------------------------------------------------------------------===//
+// Return Lowering
+//===----------------------------------------------------------------------===//
+
+SDValue LinxTargetLowering::LowerRET(SDValue Op, SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  SDValue Chain = Op.getOperand(0);
+  
+  // Load return address from RA register
+  SDValue RetAddr = DAG.getLoad(MVT::i64, DL, Chain,
+                                DAG.getRegister(Linx::RA, MVT::i64),
+                                MachinePointerInfo());
+  
+  // Emit BSTART.RET
+  return DAG.getNode(LinxISD::BSTART_RET, DL, MVT::Other, RetAddr);
+}
+
+//===----------------------------------------------------------------------===//
+// Custom DAG Nodes
+//===----------------------------------------------------------------------===//
+
+const char *LinxTargetLowering::getTargetNodeName(unsigned Opcode) const {
+  switch (Opcode) {
+  case LinxISD::PCREL:        return "LinxISD::PCREL";
+  case LinxISD::ADDPC:        return "LinxISD::ADDPC";
+  case LinxISD::SETC:         return "LinxISD::SETC";
+  case LinxISD::BSTART_STD:   return "LinxISD::BSTART_STD";
+  case LinxISD::BSTART_COND:  return "LinxISD::BSTART_COND";
+  case LinxISD::BSTART_DIRECT: return "LinxISD::BSTART_DIRECT";
+  case LinxISD::BSTART_CALL:  return "LinxISD::BSTART_CALL";
+  case LinxISD::BSTART_RET:   return "LinxISD::BSTART_RET";
+  case LinxISD::BSTOP:        return "LinxISD::BSTOP";
+  default:
+    return nullptr;
+  }
+}

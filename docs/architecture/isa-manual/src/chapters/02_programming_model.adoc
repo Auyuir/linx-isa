@@ -1,0 +1,172 @@
+[[progmodel]]
+== Programming model
+
+[[progmodel-lxcpu]]
+=== LXCPU execution context
+
+An **LXCPU** is the architectural execution context that fetches, decodes, and executes Linx instructions. Each LXCPU
+has independent architectural state (GPRs, system registers, and per-block ClockHands queues).
+
+[[progmodel-pc]]
+=== Program counters (TPC / BPC)
+
+Linx uses two program-counter concepts:
+
+* **TPC (Thread PC):** the byte address of the next instruction to execute/fetch for the current LXCPU.
+* **BPC (Block PC):** the byte address of the current block start marker (a `BSTART.*`/`C.BSTART.*`/`HL.BSTART.*` or
+  a template block such as `FENTRY`/`FRET.*`).
+
+Bring-up conventions:
+
+* At the start of a block, `BPC == TPC` and points at the block start marker.
+* Within a block, `TPC` advances by the encoded instruction length(s) while `BPC` remains the start address of the
+  block.
+* PC-relative immediates in this manual and in the ISA catalog use **TPC** as the base unless stated otherwise. For a
+  multi-part instruction, the base address is the address of the first part.
+
+Address translation (v0.1 bring-up profile):
+
+* When `TCR_ACR1.MME = 0`, instruction fetch and data accesses treat addresses as physical (identity translation).
+* When `TCR_ACR1.MME = 1`, `TPC`/`BPC` and all instruction/data addresses are virtual and translated by the CPU MMU
+  defined in <<system-mm>>.
+
+The privileged SSR state uses these names in exception capture (see <<ssr-acr-scoped>>):
+
+* `EBPC_ACRn` captures the faulting block's BPC.
+* `ETPC_ACRn` captures the faulting instruction's TPC.
+
+[[progmodel-gpr]]
+=== General-purpose registers (GPRs)
+
+Linx uses a 5-bit register encoding (32 codes). The canonical mapping of codes to names/aliases is published in the
+JSON catalog (`registers.reg5`).
+
+include::../generated/registers_reg5.adoc[]
+
+NOTE: The v0.1 `reg5` table also includes special spellings used by the assembler/disassembler for queue operations
+(e.g. destination selectors `t`/`u` used as `->t` / `->u`). These are not general-purpose
+architectural registers in the same sense as `a0`, `s0`, etc.
+
+[[progmodel-clockhands]]
+=== Block-local temporaries (ClockHands)
+
+Linx provides two independent private result queues per basic block:
+
+* **T-hand queue:** depth 4 (`t#1..t#4`), written by `->t`
+* **U-hand queue:** depth 4 (`u#1..u#4`), written by `->u`
+
+Rules (bring-up convention):
+
+* Each push shifts the queue and *kills* the oldest value.
+* Code generation must not reference killed entries; if an older value is needed later, copy it out before it expires.
+* Current bring-up assumes at most **one T read** and **one U read** per instruction form.
+
+Guidance:
+
+* Prefer ClockHands for **block-private dataflow** (values that do not cross a block boundary).
+* Use GPRs (`r1`–`r23`) for **block-shared values** (values live across blocks).
+
+[[progmodel-lb]]
+=== Loop-bound registers (LB0–LB2)
+
+Linx defines three 64-bit *loop-bound* registers: **LB0**, **LB1**, and **LB2**.
+
+They are written by `B.DIM` / `C.B.DIM*` and are intended to carry block-local loop bounds and accelerator metadata.
+
+Rules (bring-up convention):
+
+* LB registers are initialized at block start and used within the current block.
+* LB registers are part of the LXCPU architectural state and must be preserved across context switches.
+* Accelerator-style blocks (e.g. tile blocks) may use LB0–LB2 to pass dimensions and valid masks.
+
+[[progmodel-tile]]
+=== Tile registers (TAU)
+
+Linx defines a tile register file used by accelerator-oriented *tile blocks* (e.g. `BSTART.TMA`, `BSTART.CUBE`,
+`BSTART.VPAR`, `BSTART.VSEQ`).
+
+Bring-up model:
+
+* 32 architectural tile registers, organized as **4 hands × 8 depth**.
+* Each tile register holds **4 KiB** of data (1024 × 32-bit words).
+* Tile blocks bind tile inputs/outputs using block descriptors (`B.IOT`/`B.IOTI` for tiles, `B.IOR` for GPRs).
+* `B.IOTI` provides the tile transfer size using a `Size` immediate (convention: `Size = log2(bytes)`, so `Size=12`
+  denotes 4 KiB).
+
+[[progmodel-barg]]
+=== Block argument register (BARG)
+
+Linx defines a per-block architectural state called the **Block Argument Register** (**BARG**).
+
+BARG is initialized at block start and is consulted at block commit to determine:
+
+* the current block's type and control-flow kind,
+* the next block target (direct/conditional/indirect/call/return), and
+* per-block commit metadata (e.g. output register mapping for split blocks).
+
+Bring-up conventions (v0.1 draft):
+
+* `BARG.BPC` records the current block start address (**BPC**).
+* `BARG.BPCN` records the selected next block address (**BPCN**).
+* `SETC.*` updates condition/predicate-related fields of BARG (e.g. the `TAKEN`/predicate state consulted by `COND`
+  blocks).
+* `SETC.TGT` updates the next-target fields used by `IND`/`ICALL`/`RET`-class blocks.
+* At block commit (`BSTOP` or the next block start marker), the execution engine consults BARG and commits block-to-
+  block control flow (see <<blockisa>>).
+
+BARG is part of the LXCPU architectural state and MUST be preserved across context switches. On trap entry, BARG is
+captured in `EBARG_ACRm` (see <<ssr-acr-scoped>>).
+
+[[progmodel-system-registers]]
+=== System registers (SSR / ACR)
+
+Linx defines a set of **System Status Registers (SSR)** for threading/runtime state (e.g. `TP`, `GP`) and machine
+control.
+
+[[progmodel-acr]]
+==== Access Control Rings (ACR)
+
+Linx partitions privileged state using **Access Control Rings (ACR)**. The architecture defines up to **16** rings
+named **ACR0..ACR15**, which are organized as a tree rooted at **ACR0** (see <<system-acr-tree>>). In the v0.1 draft:
+
+* **ACR0 is the most privileged** (root management privilege).
+* ACR`n` (`n=0..2`) MUST be implemented by all profiles; higher-numbered rings are optional and extension-defined.
+
+Some SSRs are **ACR-scoped** (banked per ring). In the ISA catalog these appear as patterned IDs `0x n f xx` and are named
+with an `*_ACRn` suffix in this manual.
+
+Privilege transitions are requested with the control-flow instructions:
+
+* `ACRE` — request `ACR_ENTER` (management-to-managed handoff / recovery)
+* `ACRC` — request `SERVICE_REQUEST` (managed-to-management trap)
+
+Both `ACRE` and `ACRC` may trap if executed without sufficient privilege or if the requested transition is not
+permitted by the platform security policy. See <<system-transitions>>.
+
+SSR registers are accessed using the SSR access instructions:
+
+* `SSRGET` — read SSR value to a destination (`->Rd` / `->t` / `->u`)
+* `SSRSET` — write SSR value from a source register
+* `SSRSWAP` — atomically swap an SSR value with a source register value
+
+include::../generated/system_registers_ssr.adoc[]
+
+[[progmodel-fcsr]]
+=== Floating-point control and status (FCSR)
+
+Linx defines a floating-point control and status register, **FCSR**, that controls rounding and records floating-point
+exceptions for floating-point instructions.
+
+For bring-up, Linx uses the following layout (32-bit):
+
+* `FCSR[4:0]` — **exception flags** (sticky): `NV`, `DZ`, `OF`, `UF`, `NX`
+* `FCSR[7:5]` — reserved (must be zero)
+* `FCSR[10:8]` — **rounding mode** (`RM`):
+** `0`: round to nearest, ties to even (RNE)
+** `1`: round toward −∞ (RDN)
+** `2`: round toward +∞ (RUP)
+** `3`: round toward 0 (RTZ)
+** `4`: round to nearest, ties away (RMM)
+
+FCSR is part of the LXCPU architectural state and must be preserved across context switches. If not explicitly
+programmed, the initial state is `FCSR = 0` (RNE, flags clear).

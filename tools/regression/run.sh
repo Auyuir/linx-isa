@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+echo "== Linx regression =="
+
+echo
+echo "-- ISA golden checks"
+python3 "$ROOT/tools/isa/lint_no_cjk.py"
+python3 "$ROOT/tools/isa/build_golden.py" --in "$ROOT/isa/golden/v0.1" --out "$ROOT/isa/spec/current/linxisa-v0.1.json" --check
+python3 "$ROOT/tools/isa/validate_spec.py" --spec "$ROOT/isa/spec/current/linxisa-v0.1.json"
+python3 "$ROOT/tools/isa/report_encoding_space.py" --spec "$ROOT/isa/spec/current/linxisa-v0.1.json" --out "$ROOT/docs/reference/encoding_space_report.md" --check
+python3 "$ROOT/tools/isa/gen_qemu_codec.py" --spec "$ROOT/isa/spec/current/linxisa-v0.1.json" --out-dir "$ROOT/isa/generated/codecs" --check
+python3 "$ROOT/tools/isa/gen_c_codec.py" --spec "$ROOT/isa/spec/current/linxisa-v0.1.json" --out-dir "$ROOT/isa/generated/codecs" --check
+python3 "$ROOT/tools/isa/gen_manual_adoc.py" --spec "$ROOT/isa/spec/current/linxisa-v0.1.json" --out-dir "$ROOT/docs/architecture/isa-manual/src/generated" --check
+python3 "$ROOT/tools/isa/sail_coverage.py" --spec "$ROOT/isa/spec/current/linxisa-v0.1.json" --implemented "$ROOT/isa/sail/implemented_mnemonics.txt" --out "$ROOT/isa/sail/coverage.json" --check
+
+# Allow callers to override tool locations.
+CLANG="${CLANG:-}"
+LLD="${LLD:-}"
+QEMU="${QEMU:-}"
+
+if [[ -z "$CLANG" ]]; then
+  CAND="$HOME/llvm-project/build-linxisa-clang/bin/clang"
+  if [[ -x "$CAND" ]]; then
+    CLANG="$CAND"
+  fi
+fi
+if [[ -z "$LLD" && -n "$CLANG" ]]; then
+  CAND="$(cd "$(dirname "$CLANG")" && pwd)/ld.lld"
+  if [[ -x "$CAND" ]]; then
+    LLD="$CAND"
+  fi
+fi
+if [[ -z "$QEMU" ]]; then
+  CAND="$HOME/qemu/build-tci/qemu-system-linx64"
+  if [[ -x "$CAND" ]]; then
+    QEMU="$CAND"
+  else
+    CAND="$HOME/qemu/build/qemu-system-linx64"
+    if [[ -x "$CAND" ]]; then
+      QEMU="$CAND"
+    fi
+  fi
+fi
+
+if [[ -z "$CLANG" || ! -x "$CLANG" ]]; then
+  echo "error: CLANG not found; set CLANG=/path/to/clang" >&2
+  exit 1
+fi
+if [[ -z "$LLD" || ! -x "$LLD" ]]; then
+  echo "error: LLD not found; set LLD=/path/to/ld.lld" >&2
+  exit 1
+fi
+if [[ -z "$QEMU" || ! -x "$QEMU" ]]; then
+  echo "error: QEMU not found; set QEMU=/path/to/qemu-system-linx64" >&2
+  exit 1
+fi
+
+echo
+echo "-- Compiler compile-only tests (linx64)"
+(cd "$ROOT/compiler/llvm/tests" && CLANG="$CLANG" TARGET="linx64-linx-none-elf" OUT_DIR="$ROOT/compiler/llvm/tests/out-linx64" ./run.sh)
+
+echo
+echo "-- Compiler coverage report (linx64)"
+python3 "$ROOT/compiler/llvm/tests/analyze_coverage.py" --out-dir "$ROOT/compiler/llvm/tests/out-linx64" --fail-under "${COVERAGE_FAIL_UNDER:-100}"
+
+echo
+echo "-- Compiler compile-only tests (linx32)"
+(cd "$ROOT/compiler/llvm/tests" && CLANG="$CLANG" TARGET="linx32-linx-none-elf" OUT_DIR="$ROOT/compiler/llvm/tests/out-linx32" ./run.sh)
+
+echo
+echo "-- Compiler coverage report (linx32)"
+python3 "$ROOT/compiler/llvm/tests/analyze_coverage.py" --out-dir "$ROOT/compiler/llvm/tests/out-linx32" --fail-under "${COVERAGE_FAIL_UNDER:-100}"
+
+echo
+echo "-- QEMU runtime tests"
+(cd "$ROOT/tests/qemu" && CLANG="$CLANG" LLD="$LLD" QEMU="$QEMU" ./run_tests.sh --all --timeout 10)
+
+echo
+echo "-- ctuning Milepost codelets (optional)"
+CTUNING_ROOT="${CTUNING_ROOT:-$HOME/ctuning-programs}"
+CTUNING_LIMIT="${CTUNING_LIMIT:-5}"
+if [[ -d "$CTUNING_ROOT/program" ]]; then
+  python3 "$ROOT/tools/ctuning/run_milepost_codelets.py" \
+    --ctuning-root "$CTUNING_ROOT" \
+    --clang "$CLANG" \
+    --lld "$LLD" \
+    --qemu "$QEMU" \
+    --target linx64-linx-none-elf \
+    --run \
+    --limit "$CTUNING_LIMIT"
+else
+  echo "note: skipping ctuning (not found at $CTUNING_ROOT)"
+fi
+
+echo
+echo "ok: regression complete"

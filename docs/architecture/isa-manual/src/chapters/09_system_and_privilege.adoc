@@ -1,0 +1,476 @@
+[[system]]
+== System and privileged architecture (v0.1 draft)
+
+This chapter defines the v0.1 draft privileged architecture: Access Control Rings (ACR), privileged system registers
+(SSR), and the trap envelope for exceptions and interrupts.
+
+Where a profile/platform must supply additional detail for portability, this chapter marks it as a **normative TODO**.
+
+[[system-acr]]
+=== Access Control Rings (ACR)
+
+Linx partitions privileged state using **Access Control Rings** (**ACR**). The architecture defines up to **16**
+rings, named **ACR0..ACR15**.
+
+Bring-up conventions (v0.1):
+
+* On reset, an LXCPU starts executing in **ACR0**.
+* **ACR0 is the root / most privileged** ring. Rings with larger numeric IDs are typically used for progressively less
+  privileged software roles, but the set of implemented rings is profile-defined.
+* Every LXCPU executes at exactly one active ACR at a time (recorded in `CSTATE.ACR`).
+* Some privileged SSRs are **ACR-scoped** (banked per ring). In this manual those registers are written with an
+  `*_ACRn` suffix.
+
+Typical software role mapping (informative, v0.1 draft):
+
+[%header,cols="1,4"]
+|===
+|ACR |Typical role
+
+|`ACR0` |Root management privilege (firmware / bring-up monitor / initialization).
+|`ACR1` |Main system privilege (host OS or hypervisor).
+|`ACR2` |Main system user privilege (host user programs).
+|`ACR3` |Guest OS system privilege.
+|`ACR4` |Guest user privilege.
+|===
+
+[[system-acr-tree]]
+==== ACR tree and comparability
+
+Implemented ACRs are organized as a **tree rooted at ACR0**. ACR privilege is a partial order:
+
+* A parent node is **more privileged** than its children.
+* Two ACRs are **comparable** if they are the same node, or one is an ancestor of the other.
+* Two ACRs on different branches are **incomparable**.
+
+The v0.1 draft uses the following notation for comparable rings:
+
+* `n p> m` means ACR`n` is *more privileged* than ACR`m`.
+* `n p>= m` means ACR`n` is *more privileged than or equal to* ACR`m`.
+* `n p= m` means ACR`n` and ACR`m` have equal privilege (same node).
+
+ACR transitions MUST occur only between **comparable** rings.
+
+[[system-transitions]]
+=== Privilege transitions
+
+An LXCPU's active ACR may change only due to one of the following events:
+
+* an external interrupt,
+* an internal synchronous exception,
+* commit of an `ACRE` instruction (requests `ACR_ENTER`),
+* commit of an `ACRC` instruction (requests `SERVICE_REQUEST`), or
+* prepare/commit of a **system-call block** (v0.1 draft mechanism).
+
+The v0.1 draft distinguishes:
+
+* **Instruction-level switches** (`ACR_ENTER` and `SERVICE_REQUEST`).
+* **System-call-block switches**, where the caller temporarily executes a block in the callee ACR and then returns to
+  the caller ACR on block commit.
+
+[[system-acr-enter]]
+==== ACR enter (`ACR_ENTER`, via `ACRE`)
+
+`ACRE` requests an **ACR enter** transition. The request is taken at **block commit**, and `ACRE` MUST be the **last**
+instruction in its block.
+
+Target selection (v0.1 draft):
+
+* When executed in ACR`n`, `ACRE` reads the target ring from `ECSTATE_ACRn.ACR`.
+* The target ring MUST be comparable with ACR`n` and MUST satisfy `n p>= ECSTATE_ACRn.ACR`. If not, the transition
+  request MUST trap with `E_INST(EC_PARAM)`.
+
+Return-request argument (RRA):
+
+* `ACRE` encodes an immediate `RRA_Type` that controls state restoration.
+* `RRA_Type=RRAT_DEFAULT(0)`: the block-engine state (`BSTATE`) is reset to its default state.
+* `RRA_Type=RRAT_RESTORE(1)`: `BSTATE` is restored from exception state (`EBSTATE`).
+* Other values are reserved and MUST trap with `E_INST(EC_ILLEGAL)`.
+
+`ACR_ENTER` state restoration (v0.1 draft):
+
+1. `CSTATE` is restored from `ECSTATE_ACRn` (all architecturally defined fields).
+2. `BPC` is restored from `EBPC_ACRn`, and execution is scheduled at that block start.
+3. If `RRA_Type=RRAT_RESTORE`, `BSTATE` is restored from `EBSTATE` (profile-defined storage).
+4. If `RRA_Type=RRAT_RESTORE`, the block argument state (`BARG`; see <<progmodel-barg>>) is restored from
+   `EBARG_ACRn` (profile-defined for non-scalar block types).
+5. If `RRA_Type=RRAT_RESTORE`, `TPC` is restored from `ETPC_ACRn` (the trap source instruction).
+
+NOTE: The precise storage and format of `EBSTATE` for complex block types is profile-defined. See
+<<system-bstate-ebstate>>.
+
+[[system-service-request]]
+==== Service request (`SERVICE_REQUEST`)
+
+`SERVICE_REQUEST` is the v0.1 draft trap entry mechanism used to transfer control from a managed ring to a managing
+ring.
+
+Triggers:
+
+* commit of an `ACRC` instruction (software-initiated request),
+* a synchronous exception detected by the execution pipeline, or
+* an asynchronous interrupt.
+
+Terminology:
+
+* A synchronous `SERVICE_REQUEST` is a **SYNC_SERVICE_REQUEST**.
+* An asynchronous interrupt-driven `SERVICE_REQUEST` is an **ASYNC_SERVICE_REQUEST**.
+* The instruction location that triggers a `SERVICE_REQUEST` is the **trap source instruction**, identified by the
+  pair (`BPC`, `TPC`) at the time of the event.
+
+The trap number and cause are reported in `TRAPNO_ACRm` and the trap argument is reported in `TRAPARG0_ACRm` (see
+<<ssr-acr-scoped>>).
+
+NOTE: Not all exceptions invoke `SERVICE_REQUEST`. If an exception occurs in an unmanaged fixup block, it is handled
+according to the fixup block definition.
+
+[[system-service-request-flow]]
+===== Trap entry flow (v0.1 draft)
+
+For a `SERVICE_REQUEST` routed from ACR`n` to managing ring ACR`m`, the architecture performs the following steps as a
+single internal action (no intervening architectural events may occur):
+
+1. If the event is a floating-point exception, set the corresponding sticky flags in `CSTATE.flags`.
+2. Save `CSTATE` into `ECSTATE_ACRm`.
+  * Set `ECSTATE_ACRm.BI = 0` if the trap source is in the block header (a block start marker or a `B.*` header
+    descriptor) and the trap is taken while executing the header stream; otherwise set `ECSTATE_ACRm.BI = 1` (trap
+    in a block body, a decoupled out-of-line body, or a template-generated micro-op stream).
+3. Save the trap source block address (`BARG.BPC`) into `EBPC_ACRm`.
+4. Save block argument state into `EBARG_ACRm` and record the trap source block type in `EBARG_ACRm.BlockType`.
+  * Save the trap source instruction `TPC` into `ETPC_ACRm`.
+  * If the trap source block is `MPAR`, `MSEQ`, `VPAR`, or `VSEQ`, record the interrupted `GroupID` in
+    `EBARG_ACRm.GroupID`.
+5. Disable interrupts by clearing `CSTATE.I = 0`.
+6. Update the active ring to the managing ring by setting `CSTATE.ACR = m`.
+7. Reset `BARG` to its architectural initial state.
+8. Vector control to the trap handler by setting `BPC = EVBASE_ACRm`.
+9. Populate trap reporting registers:
+  * For a SYNC_SERVICE_REQUEST: set `TRAPNO_ACRm.E = 1`, then write `TRAPNO_ACRm.TRAPNUM`, `TRAPNO_ACRm.CAUSE`, and
+    `TRAPARG0_ACRm`.
+  * For an ASYNC_SERVICE_REQUEST: set `TRAPNO_ACRm.E = 0`, then write `TRAPNO_ACRm`/`TRAPARG0_ACRm` according to the
+    interrupt source definition (Xproxy-defined).
+
+NOTE: The v0.1 draft specifies `BPC` vectoring explicitly. At the start of the trap handler block, `TPC` is expected
+to equal `BPC` (see <<progmodel-pc>>).
+
+[[system-trap-routing]]
+===== Routing rules (v0.1 draft)
+
+`SERVICE_REQUEST` routing is profile-defined for interrupts. The v0.1 draft defines the following routing rules for
+software requests and for synchronous exceptions:
+
+* `ACRC` routing (see <<system-acrc>>).
+* Default exception routing (see <<system-exception-routing>>).
+
+[[system-acrc]]
+====== Software service request (`ACRC`)
+
+`ACRC` requests a `SERVICE_REQUEST` and immediately commits its block. `ACRC` MUST be the last instruction in its
+block.
+
+Assembly syntax:
+
+* `acrc request_type`
+
+Valid `request_type` encodings (v0.1 draft):
+
+* When executed in **ACR1**:
+  - `SCT_MAC(0)`: machine request (typically routed to BIOS/firmware services).
+  - `SCT_SEC(2)`: security request (typically routed to security services).
+* When executed in **ACR2**:
+  - `SCT_MAC(0)`: machine request.
+  - `SCT_SYS(1)`: system call (typically a user-to-OS request).
+  - `SCT_SEC(2)`: security request.
+* In other ACRs, all `request_type` values are invalid.
+
+Routing (v0.1 draft):
+
+* `ACR2` + `SCT_SYS` routes to **ACR1**.
+* All other valid `request_type` values route to **ACR0**.
+* Invalid encodings MUST trap with `E_INST(EC_ILLEGAL)`.
+
+[[system-trap-resume]]
+====== Resuming after a software request (redo vs advance)
+
+On `ACRC`, hardware saves the current block address (`BPC`) and the instruction address (`TPC`) into the managing
+ring's trap-save registers (`EBPC_ACRm` and `ETPC_ACRm`).
+
+Software may choose how execution resumes when it later uses `ACRE` to return:
+
+* **Redo** the `ACRC`: leave `EBPC_ACRm` and `ETPC_ACRm` unmodified.
+* **Advance** to the next instruction: update both `EBPC_ACRm` and `ETPC_ACRm` to `ETPC_ACRm + 4` (the `ACRC`
+  instruction length), which typically points at the next block start marker.
+
+[[system-exception-routing]]
+====== Default exception routing
+
+The v0.1 draft defines the following default managing ring selection for synchronous exceptions:
+
+[%header,cols="2,1,1,1,1"]
+|===
+|Exception class |Trap number |If executing in ACR0 |If executing in ACR1 |If executing in ACR2
+
+|Instruction-related |`E_INST` |ACR0 |ACR1 |ACR1
+|Data access-related |`E_DATA` |ACR0 |ACR1 |ACR1
+|Block-format-related |`E_BLOCK` |ACR0 |ACR1 |ACR1
+|Assert |`E_ASSERT` |ACR0 |ACR1 |ACR1
+|Breakpoint |`E_BREAKPOINT` |ACR0 |ACR1 |ACR1
+|Illegal SSR access |`E_ISSR` |ACR0 |ACR1 |ACR1
+|===
+
+For `E_SCALL` (software calls), routing is defined by the `ACRC` `request_type` rules above.
+
+[[system-bstate-ebstate]]
+=== Block engine state (`BSTATE` / `EBSTATE`)
+
+A block execution unit may maintain internal state beyond the first-layer architectural state. The v0.1 draft names
+this internal per-block state **BSTATE**.
+
+* `CSTATE` is **not** part of `BSTATE`; it is first-layer architectural state.
+* `EBSTATE` is the storage used to save/restore `BSTATE` during trap handling.
+
+Trap save/restore for scalar block types (`STD`, `SYS`, `FP`) is implemented using privileged SSRs (see
+<<ssr-acr-scoped>>):
+
+* save `BARG.BPC` → `EBPC_ACRm`
+* save `BARG.BPCN` → `EBPCN_ACRm`
+* save remaining `BARG` fields → `EBARG_ACRm`
+* save `TPC` → `ETPC_ACRm`
+
+For complex block types (`VPAR`, `VSEQ`, `MPAR`, `MSEQ`), the v0.1 draft additionally records `GroupID` in
+`EBARG_ACRm.GroupID`. The bulk storage and restoration of other block-engine state is profile-defined (e.g. via tile
+registers and/or memory).
+
+Dirty vs clean `BSTATE` (v0.1 draft):
+
+* If a `SERVICE_REQUEST` interrupts a block while its `BSTATE` has been modified but not committed, the `BSTATE` is
+  **dirty**.
+* If `BSTATE` is dirty, the implementation saves it into the selected `EBSTATE` storage and sets `CSTATE.ebv = 1`.
+* If `BSTATE` is clean, `EBSTATE` storage remains unchanged and `CSTATE.ebv = 0`.
+
+[[system-bstate-bi]]
+==== `BI` (trap location: header vs body)
+
+`ECSTATE_ACRm.BI` reports whether a trap interrupted **block header execution** or **block body execution**:
+
+* `BI = 0`: trap while executing the block header stream (block start marker or `B.*` header descriptor).
+* `BI = 1`: trap while executing a block body, including:
+** any instruction in a coupled block body (non-header instruction),
+** any instruction in a decoupled out-of-line body (see <<blockisa-forms-decoupled>>),
+** any template-generated micro-op stream (see <<templates-restart>>).
+
+For template blocks, traps caused by decode/validation of the template instruction itself (e.g. illegal encoding)
+SHOULD set `BI = 0`, while traps taken after template execution has begun (during generated micro-ops) MUST set
+`BI = 1`.
+
+[[system-bstate-min]]
+==== Minimum required `BSTATE` / `EBSTATE` contents (v0.1 bring-up profile)
+
+Implementations targeting the v0.1 bring-up profile MUST implement at least the following `BSTATE` fields and MUST
+save/restore them via `EBSTATE` when `BSTATE` is dirty and `ACRE RRAT_RESTORE` is used.
+
+Unless otherwise specified, fields are **XLEN** wide. Addresses are byte addresses.
+
+* `BSTATE.Common` (all block types):
+** `InBody`: whether execution is currently in a decoupled out-of-line body or in a template micro-op stream.
+** `BodyTPC`: body entrypoint (`B.TEXT` target) for decoupled blocks (valid when `InBody=1` for decoupled blocks).
+** `ReturnTPC`: header continuation address for decoupled blocks (valid when `InBody=1` for decoupled blocks).
+** `BlockType`: the current block type.
+* `BSTATE.Vector` (vector block types such as `VPAR`/`VSEQ`):
+** `GroupID`: the current group ID.
+** `ActiveMask`: the active-lane mask (may be fixed in early bring-up).
+* `BSTATE.Template` (template blocks such as `FENTRY`/`FEXIT`/`FRET.*`/`MCOPY`/`MSET`):
+** `TemplateKind`: which template is executing.
+** `StepIndex`: micro-op progress cursor.
+** `RemainingCount`: remaining element/iteration count (template-defined).
+** `CursorAddr`: current memory cursor address (template-defined).
+** `RegCursor`: current register/cursor selector (template-defined).
+* `BSTATE.TMA` (`TMA`-class blocks):
+** `TransferCursor`: current transfer cursor (implementation-defined).
+** `RemainingBytes` and/or `RemainingRows`: remaining transfer size (implementation-defined).
+** `FaultRestartInfo`: sufficient information to restart after a translation or access fault.
+
+[[system-ssr]]
+=== Privileged system registers (SSR)
+
+The privileged trap envelope is defined around a set of **manager-ACR SSR families** (see <<ssr-acr-scoped>>):
+
+* `ECSTATE_ACRn` mirrors key `CSTATE` fields and records whether a trap interrupted the block body (`BI`).
+* `EVBASE_ACRn` selects the exception/interrupt handler vector base for the managing ring.
+* `TRAPNO_ACRn` / `TRAPARG0_ACRn` report the trap number/cause and argument.
+* `EBPC_ACRn` / `EBPCN_ACRn` / `EBARG_ACRn` / `ETPC_ACRn` save trap source state for later recovery.
+
+These SSRs use IDs of the form `0xnfxx` and are visible in the global SSR ID space. In the v0.1 privilege model they
+MUST be accessible from ACR0 and ACR1; other ACRs may ignore accesses or may trap with `E_ISSR`.
+
+[[system-mm]]
+=== Memory management (TTBR0/TTBR1) and IOMMU (v0.1 bring-up profile)
+
+This section defines the v0.1 bring-up MMU and IOMMU contract. It uses an **ARM-inspired TTBR0/TTBR1 split** for the
+CPU MMU, while keeping permission bits and software expectations simple.
+
+Unless stated otherwise, the configuration registers in this section are ACR-scoped privileged SSRs for `ACR1` and are
+accessed using `HL.SSRGET/HL.SSRSET`:
+
+* `TTBR0_ACR1 (0x1F10)` (alias: `MMTBASE_ACR1`)
+* `TTBR1_ACR1 (0x1F11)` (alias: `MMCONFIG_ACR1`)
+* `TCR_ACR1 (0x1F12)`
+* `MAIR_ACR1 (0x1F13)`
+* `IOTTBR_ACR1 (0x1F14)`
+* `IOTCR_ACR1 (0x1F15)`
+* `IOMAIR_ACR1 (0x1F16)`
+
+[[system-mm-defaults]]
+==== Addressing defaults
+
+v0.1 bring-up defaults:
+
+* Endianness: little.
+* Page granule: 4 KiB.
+* Virtual addresses (VA): 48-bit canonical:
+** bits `[63:48]` MUST replicate bit `VA[47]`,
+** a non-canonical VA MUST fault (treated as a translation fault).
+* Region select (CPU MMU): `VA[47]=0` selects `TTBR0`, `VA[47]=1` selects `TTBR1`.
+* Physical addresses (PA): 48-bit. Bits above PA[47] are reserved and MUST be zero in translation results.
+
+[[system-mm-ttbr]]
+==== `TTBR0_ACR1` / `TTBR1_ACR1` layout (64-bit)
+
+`TTBR0_ACR1` (v0.1):
+
+* `[63:48] ASID` — address-space ID used to tag `TTBR0` translations.
+* `[47:12] BasePA` — physical base address of the level-0 translation table (4 KiB aligned).
+* `[11:0]` — reserved, MUST be zero.
+
+`TTBR1_ACR1` (v0.1):
+
+* `[63:48]` — reserved, SHOULD be zero (ASID ignored in v0.1 for `TTBR1`).
+* `[47:12] BasePA` — physical base address of the level-0 translation table (4 KiB aligned).
+* `[11:0]` — reserved, MUST be zero.
+
+[[system-mm-tcr]]
+==== `TCR_ACR1` layout (v0.1 subset)
+
+Only the following `TCR_ACR1` fields are defined in the v0.1 bring-up profile. All other bits are reserved and MUST
+be zero; any non-zero reserved bit MUST trap with `E_INST(EC_ILLEGAL)`.
+
+* `MME` (bit 0) — MMU enable (`0`: translation disabled / identity; `1`: translation enabled).
+* `T0SZ` (bits `[6:1]`) — `TTBR0` VA size offset. Default `16` (48-bit VA).
+* `T1SZ` (bits `[12:7]`) — `TTBR1` VA size offset. Default `16` (48-bit VA).
+* `EPD0` (bit 13) — disable `TTBR0` translation walks when set (treat as translation fault).
+* `EPD1` (bit 14) — disable `TTBR1` translation walks when set (treat as translation fault).
+* `A1` (bit 15) — ASID select. Fixed `0` in v0.1.
+
+When `MME=0`, the CPU MUST perform no page-table walks and MUST treat VA as PA for instruction fetch and data access.
+
+[[system-mm-mair]]
+==== `MAIR_ACR1` layout (ARM-like, minimal)
+
+`MAIR_ACR1` provides 8 independent 8-bit attribute encodings (`Attr0..Attr7`), packed into a 64-bit register. In v0.1,
+software MUST use only `AttrIdx` values `0..2`:
+
+* `AttrIdx=0`: Device-nGnRnE
+* `AttrIdx=1`: Normal WB RA/WA
+* `AttrIdx=2`: Normal NC
+
+Other `AttrIdx` values are reserved in v0.1 and MUST fault if used in a valid translation entry.
+
+[[system-mm-pt]]
+==== Page table format (4-level, 4 KiB)
+
+Translation uses 4 levels of 4 KiB tables (`L0/L1/L2/L3`). Each table contains 512 64-bit entries.
+
+For 4 KiB pages with 48-bit VA, the v0.1 bring-up profile uses the following index bits:
+
+* `L0 index` = `VA[47:39]`
+* `L1 index` = `VA[38:30]`
+* `L2 index` = `VA[29:21]`
+* `L3 index` = `VA[20:12]`
+* `page offset` = `VA[11:0]`
+
+Descriptor type (v0.1):
+
+* Invalid: `Desc[1:0] = 00`
+* Table: `Desc[1:0] = 11` (points to next-level table)
+* Block: `Desc[1:0] = 10` (maps a range at `L1` or `L2`; optional in v0.1)
+* Page: `Desc[1:0] = 01` (maps a 4 KiB page at `L3`)
+
+Table descriptor format (`Desc[1:0]=11`):
+
+* `[47:12] NextTableBasePA` — physical base address of the next-level table (4 KiB aligned).
+* `[11:2]` — reserved, MUST be zero.
+
+Page/block descriptor format (`Desc[1:0]=01` for `L3` pages, `Desc[1:0]=10` for `L1/L2` blocks):
+
+* `[47:12] OutputBasePA` — mapped physical base address (aligned to the mapping size).
+* `[11:10]` — reserved, MUST be zero.
+* `[9:7] AttrIdx` — selects an 8-bit attribute from `MAIR_ACR1`.
+* `[6] AF` — access flag. If `AF=0`, the access MUST fault (the walker MAY set `AF` as an implementation choice).
+* `[5] U` — user access allow.
+* `[4] X` — execute allow.
+* `[3] W` — write allow.
+* `[2] R` — read allow.
+
+Permission interpretation (v0.1):
+
+* A read access requires `R=1`; otherwise a permission fault MUST be raised.
+* A write access requires `W=1`; otherwise a permission fault MUST be raised.
+* An instruction fetch requires `X=1`; otherwise an execute fault MUST be raised.
+* If executing in `ACR2` (user), access additionally requires `U=1`; otherwise a user-access fault MUST be raised.
+
+NOTE: For v0.1, software SHOULD assume that `Block` descriptors are not implemented unless explicitly indicated by the
+platform profile (e.g. a feature bit in `LCFR`).
+
+[[system-mm-faults]]
+==== Faults and reporting
+
+CPU translation and permission faults MUST raise a synchronous `E_DATA` exception. The faulting VA MUST be reported in
+`TRAPARG0_ACRm`. The `TRAPNO_ACRm.CAUSE` encoding for these faults is profile-defined; in the v0.1 bring-up profile,
+implementations SHOULD report `CAUSE=MMU_PF` for translation faults and `CAUSE=MMU_PERM` for permission faults.
+
+[[system-iommu]]
+==== IOMMU (v0.1 bring-up profile)
+
+DMA-style engines (including `TMA` engines) MUST perform address translation using the IOMMU when enabled.
+
+* IOVA is treated as 48-bit canonical, identical to VA.
+* Translation uses `IOTTBR_ACR1`/`IOTCR_ACR1`/`IOMAIR_ACR1` and the same table format as the CPU MMU.
+
+`IOTTBR_ACR1` layout (64-bit, v0.1):
+
+* `[63:48]` — reserved, SHOULD be zero.
+* `[47:12] BasePA` — physical base address of the level-0 IOMMU translation table (4 KiB aligned).
+* `[11:0]` — reserved, MUST be zero.
+
+`IOTCR_ACR1` layout (v0.1 subset):
+
+* `IME` (bit 0) — IOMMU enable (`0`: identity; `1`: translate IOVA).
+* `SZ` (bits `[6:1]`) — IOVA size offset. Default `16` (48-bit IOVA).
+* All other bits are reserved and MUST be zero; any non-zero reserved bit MUST trap with `E_INST(EC_ILLEGAL)`.
+
+`IOMAIR_ACR1` layout matches `MAIR_ACR1`.
+
+IOMMU translation faults MUST raise a synchronous `E_DATA` exception with `TRAPARG0_ACRm` set to the faulting IOVA. In
+the v0.1 bring-up profile, implementations SHOULD report `CAUSE=IOMMU_PF`.
+
+[[system-timers]]
+=== Timers and counters
+
+The base SSR namespace includes timer/counter registers such as `TIME` and `CYCLE` (see <<ssr-table>>). Privileged
+timer programming uses `TIMER_TIME_ACRn` / `TIMER_TIMECMP_ACRn` (see <<ssr-acr-scoped>>).
+
+[[system-debug]]
+=== Debug and break
+
+`EBREAK` is an execution-control instruction intended for debugging and bring-up. Its trap/debug entry behavior is
+profile-defined.
+
+[[system-todos]]
+=== Normative TODOs (privileged architecture)
+
+The following items must be specified by the privileged architecture/profile for software portability:
+
+* Interrupt definitions (Xproxy sources, IDs, priorities, and target ring routing).
+* Exception/interrupt vectoring rules beyond `EVBASE` (offsets, priorities, nesting).
+* Precise state rules on trap entry for each block type (what is committed/rolled back, and EBSTATE storage formats).
+* System-call block calling convention details and cross-ring return/repair rules.

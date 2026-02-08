@@ -1,0 +1,203 @@
+//===-- LinxBlockFormation.cpp - Linx Block ISA Formation Pass ----------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file implements the Linx Block Formation pass, which converts
+// MachineBasicBlocks into Block ISA format with BSTART/BSTOP markers.
+//
+//===----------------------------------------------------------------------===//
+
+#include "Linx.h"
+#include "LinxInstrInfo.h"
+#include "LinxMachineFunctionInfo.h"
+#include "LinxSubtarget.h"
+#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/Passes.h"
+#include "llvm/Support/Debug.h"
+
+using namespace llvm;
+
+#define DEBUG_TYPE "linx-block-formation"
+
+namespace {
+
+class LinxBlockFormation : public MachineFunctionPass {
+public:
+  static char ID;
+
+  LinxBlockFormation() : MachineFunctionPass(ID) {
+    initializeLinxBlockFormationPass(*PassRegistry::getPassRegistry());
+  }
+
+  bool runOnMachineFunction(MachineFunction &MF) override;
+  
+  StringRef getPassName() const override {
+    return "Linx Block ISA Formation";
+  }
+
+private:
+  const LinxInstrInfo *TII;
+  const LinxRegisterInfo *TRI;
+  
+  void insertBlockStart(MachineBasicBlock &MBB);
+  void insertBlockStop(MachineBasicBlock &MBB);
+  void handleBlockTransition(MachineBasicBlock &MBB, 
+                              MachineBasicBlock &NextMBB);
+  bool isBlockTerminator(const MachineInstr &MI);
+  Linx::BlockType getBlockType(const MachineBasicBlock &MBB);
+};
+
+} // end anonymous namespace
+
+char LinxBlockFormation::ID = 0;
+
+INITIALIZE_PASS(LinxBlockFormation, "linx-block-formation",
+                "Linx Block ISA Formation", false, false)
+
+FunctionPass *llvm::createLinxBlockFormationPass() {
+  return new LinxBlockFormation();
+}
+
+bool LinxBlockFormation::runOnMachineFunction(MachineFunction &MF) {
+  TII = MF.getSubtarget<LinxSubtarget>().getInstrInfo();
+  TRI = MF.getSubtarget<LinxSubtarget>().getRegisterInfo();
+  
+  bool Changed = false;
+  
+  // Insert BSTART at the beginning of each MBB
+  for (MachineBasicBlock &MBB : MF) {
+    if (!MBB.empty()) {
+      insertBlockStart(MBB);
+      Changed = true;
+    }
+  }
+  
+  // Insert BSTOP before terminators and handle transitions
+  for (MachineBasicBlock &MBB : MF) {
+    if (MBB.empty())
+      continue;
+    
+    // Check if this block ends with a terminator
+    MachineInstr *Terminator = nullptr;
+    for (auto I = MBB.rbegin(); I != MBB.rend(); ++I) {
+      if (isBlockTerminator(*I)) {
+        Terminator = &*I;
+        break;
+      }
+    }
+    
+    if (Terminator) {
+      // Insert BSTOP before terminator
+      insertBlockStop(MBB);
+      Changed = true;
+    } else {
+      // Block falls through - handle transition
+      MachineBasicBlock *NextMBB = MBB.getNextNode();
+      if (NextMBB) {
+        handleBlockTransition(MBB, *NextMBB);
+        Changed = true;
+      }
+    }
+  }
+  
+  return Changed;
+}
+
+void LinxBlockFormation::insertBlockStart(MachineBasicBlock &MBB) {
+  DebugLoc DL;
+  if (!MBB.empty())
+    DL = MBB.front().getDebugLoc();
+  
+  Linx::BlockType BType = getBlockType(MBB);
+  
+  // Determine BSTART variant based on block type
+  unsigned Opcode;
+  switch (BType) {
+  case Linx::BLOCK_STD:
+    Opcode = Linx::C_BSTART_STD;
+    break;
+  case Linx::BLOCK_COND:
+    Opcode = Linx::C_BSTART_COND;
+    break;
+  case Linx::BLOCK_DIRECT:
+    Opcode = Linx::C_BSTART_DIRECT;
+    break;
+  case Linx::BLOCK_CALL:
+    Opcode = Linx::BSTART_CALL;
+    break;
+  case Linx::BLOCK_RET:
+    Opcode = Linx::BSTART_RET;
+    break;
+  default:
+    Opcode = Linx::C_BSTART_STD;
+    break;
+  }
+  
+  BuildMI(MBB, MBB.begin(), DL, TII->get(Opcode));
+}
+
+void LinxBlockFormation::insertBlockStop(MachineBasicBlock &MBB) {
+  // Find the last non-terminator instruction
+  MachineBasicBlock::iterator InsertPos = MBB.end();
+
+  for (auto I = MBB.rbegin(); I != MBB.rend(); ++I) {
+    if (isBlockTerminator(*I)) {
+      InsertPos = std::next(I.base());
+      break;
+    }
+  }
+
+  if (InsertPos == MBB.end())
+    return;
+
+  DebugLoc DL;
+  if (InsertPos != MBB.begin())
+    DL = std::prev(InsertPos)->getDebugLoc();
+
+  BuildMI(MBB, InsertPos, DL, TII->get(Linx::C_BSTOP));
+}
+
+void LinxBlockFormation::handleBlockTransition(MachineBasicBlock &MBB,
+                                                MachineBasicBlock &NextMBB) {
+  // For fall-through blocks, the next BSTART implicitly terminates this block
+  // No explicit BSTOP needed
+}
+
+bool LinxBlockFormation::isBlockTerminator(const MachineInstr &MI) {
+  return MI.isTerminator() || 
+         MI.getOpcode() == Linx::BSTART_CALL ||
+         MI.getOpcode() == Linx::BSTART_RET ||
+         MI.getOpcode() == Linx::BSTART_DIRECT ||
+         MI.getOpcode() == Linx::C_BSTART_COND;
+}
+
+Linx::BlockType LinxBlockFormation::getBlockType(const MachineBasicBlock &MBB) {
+  // Analyze MBB to determine block type
+  // Check for call instructions
+  for (const MachineInstr &MI : MBB) {
+    if (MI.isCall())
+      return Linx::BLOCK_CALL;
+    if (MI.isReturn())
+      return Linx::BLOCK_RET;
+  }
+  
+  // Check successors for conditional branches
+  if (MBB.succ_size() > 1)
+    return Linx::BLOCK_COND;
+  
+  // Check for direct branches
+  if (MBB.succ_size() == 1) {
+    const MachineBasicBlock *Succ = *MBB.succ_begin();
+    if (Succ != MBB.getNextNode())
+      return Linx::BLOCK_DIRECT;
+  }
+  
+  return Linx::BLOCK_STD;
+}

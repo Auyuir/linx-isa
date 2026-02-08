@@ -1,0 +1,70 @@
+//===-- LinxTileLowering.cpp - Linx Tile Operation Lowering --------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file implements lowering of Tile operations (TLOAD, TSTORE, TCVT, etc.)
+//
+//===----------------------------------------------------------------------===//
+
+#include "LinxISelLowering.h"
+#include "LinxSubtarget.h"
+#include "llvm/CodeGen/SelectionDAG.h"
+#include "llvm/CodeGen/TargetLowering.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/Support/ErrorHandling.h"
+
+using namespace llvm;
+
+SDValue LinxTargetLowering::LowerTileOperation(SDValue Op,
+                                               SelectionDAG &DAG) const {
+  unsigned OpNum = Op.getOpcode();
+
+  // Check if this is a target intrinsic
+  if (OpNum >= ISD::BUILTIN_OP_END) {
+    // This is a target-specific node
+    return SDValue();
+  }
+
+  // For now, return unlowered if not a tile intrinsic we handle
+  return Op;
+}
+
+SDValue LinxTargetLowering::LowerTLOAD(SDValue Op, SelectionDAG &DAG) const {
+  // TLOAD: Load data from memory into Tile register
+  // This is a placeholder implementation
+  // In a full implementation, this would create the appropriate TLOAD instruction
+
+  // For now, return an unlowered node to allow compilation to proceed
+  // The actual lowering would require proper Tile register class support
+  return Op;
+}
+
+SDValue LinxTargetLowering::LowerTSTORE(SDValue Op, SelectionDAG &DAG) const {
+  // TSTORE: Store data from Tile register to memory
+  // This is a placeholder implementation
+  return Op;
+}
+
+SDValue LinxTargetLowering::LowerTCVT(SDValue Op, SelectionDAG &DAG) const {
+  // TCVT: Convert tile data format
+  // This is a placeholder implementation
+  return Op;
+}
+
+SDValue LinxTargetLowering::LowerMAMULB(SDValue Op, SelectionDAG &DAG) const {
+  // MAMULB: Matrix multiply
+  // This is a placeholder implementation
+  return Op;
+}
+
+//===----------------------------------------------------------------------===//
+// Tile Register Allocation
+//===----------------------------------------------------------------------===//
+
+// Tile registers are allocated in a post-RA pass
+// This pass assigns Tile operations to physical Tile registers (T, U, M, N, ACC)
+// and manages their lifetimes within blocks

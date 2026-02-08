@@ -1,0 +1,83 @@
+// Curated from isa-draft.txt (system registers + ACR sections).
+// Keep this file in sync with docs/isa-manual and the source drafts.
+
+[[ssr-table]]
+==== System Status Registers (SSR)
+
+The following **System Status Registers (SSR)** are defined by the v0.1 privilege/system draft.
+Unless noted, SSR values are **XLEN** wide and are accessed with the SSR access instructions.
+
+SSR access instructions:
+
+* `SSRGET` / `SSRSET` / `SSRSWAP` (32-bit forms) encode a **12-bit** `SSR_ID[11:0]`.
+* `HL.SSRGET` / `HL.SSRSET` (48-bit forms) encode a **24-bit** `SSR_ID[23:0]` and are used when the full SSR ID does
+  not fit in 12 bits (e.g. `0x1F10`).
+* `C.SSRGET` (16-bit) reads a small set of commonly used registers; its `SSRID` encoding is a profile-defined remap.
+
+[%header,cols="1,1,4"]
+|===
+|SSR_ID |Name |Description
+
+|`0x0000` |`TP` |Thread pointer (TLS base).
+|`0x0001` |`GP` |Global pointer (global data base).
+
+|`0x0010` |`TIME` |Timer counter.
+|`0x0C00` |`CYCLE` |Cycle counter.
+
+|`0x0020` |`CSTATE` |Common state (privilege + execution state). See <<system-service-request>>.
+|`0x0021` |`LXLCID` |Linx logical core ID.
+|`0x0022` |`VENDOR` |Vendor ID.
+|`0x0023` |`VERSION` |Core version.
+|`0x0024` |`LCFR` |Core feature description (includes `LaneNum`).
+|`0x0025` |`LCFR_EN` |Core feature enable.
+
+|===
+
+NOTE: The v0.1 draft reserves `0x0050..0x005F` for loop-control registers used by parallel/loop blocks.
+
+[[ssr-acr-scoped]]
+==== Manager-ACR (privileged) SSR families
+
+Privileged SSRs are addressed using IDs of the form `SSR_ID = 0x n f xx` (16-bit), where `n` is the manager ACR ID.
+
+In the v0.1 privilege model:
+
+* These SSRs MUST be accessible from **ACR0** and **ACR1**.
+* Accesses from other ACRs MAY be ignored or MAY raise `E_ISSR` (illegal-SSR trap), depending on the platform profile.
+
+Use `HL.SSRGET/HL.SSRSET` when the full `SSR_ID` does not fit in 12 bits.
+
+[%header,cols="1,1,4"]
+|===
+|SSR_ID |Name |Description
+
+|`0xnf00` |`ECSTATE_ACRn` |Exception state. Includes `BI` and mirrors key `CSTATE` fields.
+|`0xnf01` |`EVBASE_ACRn` |Exception vector base.
+|`0xnf02` |`TRAPNO_ACRn` |Trap number + cause + sync/async bit (`E`).
+|`0xnf03` |`TRAPARG0_ACRn` |Trap argument 0.
+|`0xnf05` |`ETEMP_ACRn` |Exception temporary.
+|`0xnf06` |`FUTO_ACRn` |Fixup takeover.
+|`0xnf07` |`ECONFIG_ACRn` |Exception/interrupt configuration.
+|`0xnf08` |`IPENDING_ACRn` |Interrupt pending.
+|`0xnf09` |`TOPEI_ACRn` |Top pending interrupt ID.
+|`0xnf0A` |`EOIEI_ACRn` |End-of-interrupt.
+|`0xnf0B` |`EBPC_ACRn` |Saved BPC of the trap source block.
+|`0xnf0C` |`EBARG_ACRn` |Saved BARG (block arguments) of the trap source block.
+|`0xnf0D` |`ETPC_ACRn` |Saved TPC of the trap source instruction (scalar block types).
+|`0xnf0E` |`EBPCN_ACRn` |Saved next-BPC (`BPCN`) of the trap source block.
+
+|`0x1F10` |`TTBR0_ACR1` |CPU MMU table base register 0 (ACR1). Alias: `MMTBASE_ACR1`.
+|`0x1F11` |`TTBR1_ACR1` |CPU MMU table base register 1 (ACR1). Alias: `MMCONFIG_ACR1`.
+|`0x1F12` |`TCR_ACR1` |CPU MMU translation control (ACR1).
+|`0x1F13` |`MAIR_ACR1` |CPU MMU memory attribute indirection register (ACR1).
+|`0x1F14` |`IOTTBR_ACR1` |IOMMU translation table base (ACR1).
+|`0x1F15` |`IOTCR_ACR1` |IOMMU translation control (ACR1).
+|`0x1F16` |`IOMAIR_ACR1` |IOMMU memory attribute indirection register (ACR1).
+
+|`0xnf20` |`TIMER_TIME_ACRn` |Timer register.
+|`0xnf21` |`TIMER_TIMECMP_ACRn` |Timer compare register.
+
+|`0xnf30` |`XBINFO_ACRn` |Cross-block info (XB entry metadata).
+|`0xnf31` |`ACR_PARAM_ACRn` |ACR parameter.
+
+|===

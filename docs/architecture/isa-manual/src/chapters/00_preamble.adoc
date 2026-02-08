@@ -1,0 +1,24 @@
+[[preamble]]
+== Preamble
+
+This document is a *draft* ISA manual for the **Linx Instruction Set Architecture (Linx ISA)**.
+
+The single source of truth for instruction encodings in this repo is:
+
+* `isa/spec/current/linxisa-v0.1.json` (machine-readable catalog built from `isa/golden/v0.1/`)
+* `isa/generated/codecs/` (generated encode/decode tables derived from the JSON)
+
+Where this manual and the machine-readable catalog disagree, treat the JSON as authoritative.
+
+[[preamble-scope]]
+=== Scope and maturity
+
+Linx in this repository is under active bring-up. Some subsystems (toolchain, emulator, RTL) may not implement all
+forms described by the catalog yet.
+
+This manual focuses on:
+
+* Architectural state and assembly conventions
+* The block-structured control-flow model (`BSTART/BSTOP` and `SETC`)
+* Template instructions (e.g. `FENTRY`, `FRET.*`) used by toolchains
+* A complete instruction reference generated from the catalog

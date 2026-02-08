@@ -1,0 +1,3296 @@
+diff --git a/docs/linxisa/bringup-plan.md b/docs/linxisa/bringup-plan.md
+index 62a77df7fe..e5f44f89a9 100644
+--- a/docs/linxisa/bringup-plan.md
++++ b/docs/linxisa/bringup-plan.md
+@@ -1,68 +1,247 @@
+ # LinxISA Linux bring-up plan (QEMU `virt`)
+ 
+-Goal: boot a real Linux kernel on the LinxISA QEMU `virt` machine, iterating
+-from “prints a banner” to “boots initramfs”.
++This bring-up plan is **mirrored** between:
+ 
+-This plan assumes **linx64 first**, **single CPU**, and the current `virt`
+-hardware model (RAM + UART + exit register).
++- Linux: `/Users/zhoubot/linux/Documentation/linxisa/bringup-plan.md` (**canonical; edit here**)
++- QEMU: `/Users/zhoubot/qemu/docs/linxisa/bringup-plan.md` (synced copy; do not hand-edit)
+ 
+-## Milestones
++Sync helper:
++
++```bash
++cd /Users/zhoubot/linux
++tools/linxisa/sync-docs.sh
++```
++
++If you don’t have the QEMU repo at `/Users/zhoubot/qemu`, you can skip syncing
++the mirror by running `SKIP_QEMU=1 tools/linxisa/sync-docs.sh`.
++
++## Summary (as of 2026-02-07)
++
++This plan:
++
++1. Reflects **current progress** (kernel boots to initramfs shell on QEMU `virt`).
++2. Captures the explicit **gap to “full Linux”** (MMU, SMP, signals, real userspace, devices).
++3. Defines **mirroring** (Linux canonical + QEMU synced copy).
++4. Adds **verification expectations** for **QEMU + RTL difftest** at each milestone.
++
++## Definitions / success criteria
++
++**“Full Linux implementation” target (upstream-like):**
++
++- **MMU-capable**, **SMP-capable** Linux port that can run standard ELF userspace
++  (musl/glibc), signals, pthreads, and common subsystems.
++- Primary execution target is **QEMU** (`qemu-system-linx64 -machine virt`), but
++  every milestone has a **RTL difftest** expectation.
++
++**Baseline assumptions (current):**
++
++- ABI: **linx64 (LP64)** — see `Documentation/linxisa/abi.md`.
++- Boot ABI (QEMU `virt`): `a0=hartid`, `a1=dtb` (initrd + cmdline via DT `/chosen`).
++- Current stage is **NOMMU, 1 CPU**.
++- QEMU `virt` provides: RAM + UART + exit-reg + timer SSRs — see `/Users/zhoubot/qemu/docs/linxisa/README.md`.
++
++## Section A — Current bring-up milestones (QEMU `virt`)
+ 
+ ### M0: Baseline sanity (toolchain + QEMU)
+ 
+-- [ ] `scripts/linxisa/run-hello-uart.sh` prints and exits.
+-- [ ] `scripts/linxisa/run-c-tests.sh` passes (optional; depends on `~/linxisa`).
++- [x] `scripts/linxisa/run-hello-uart.sh` prints and exits. (Validated historically; re-validate and record date if needed.)
++
++### M1: Define and validate the LinxISA Linux boot ABI
++
++- [x] Boot ABI is documented in `Documentation/linxisa/abi.md`.
++- [x] Bootstub validates DT handoff (`tools/linxisa/bootstub/` + `scripts/linxisa/run-linux-bootstub.sh` in the QEMU repo).
++
++### M2: Linux arch skeleton (`arch/linx/`) builds
++
++- [x] `make ARCH=linx LLVM=1` produces a bootable `vmlinux`.
++- [x] Kernel reaches `start_kernel()`.
++
++### M3: Console output
++
++- [x] Kernel prints reliably on QEMU `-nographic` via the `virt` UART.
++
++### M4: Exceptions + timers (minimal)
++
++- [x] Trap vector installed (EVBASE) and basic trap entry/return works.
++- [x] Timer interrupt path works enough for `jiffies`/tick.
++- [x] Delay works sufficiently for bring-up (generic calibrate + `__delay`).
++
++### M5: MMU + memory management (required for “full Linux”)
++
++- [ ] Define page table format + virtual memory layout.
++- [ ] Implement paging_init + TLB/cache ops.
++- [ ] Enable `CONFIG_MMU=y` boot on QEMU (requires QEMU MMU implementation).
++
++### M6: Boot to userspace (bring-up initramfs)
++
++- [x] Initramfs runs `/init` and provides an interactive shell.
++- [x] Clean shutdown: `poweroff` triggers QEMU exit-reg (no infinite halt).
++
++Evidence:
++
++- Status snapshot: `Documentation/linxisa/bringup-status.md` (2026-02-07).
++- Regression: `cd /Users/zhoubot/linux && SKIP_BUILD=1 TIMEOUT=25 python3 tools/linxisa/initramfs/smoke.py`.
++
++## Section B — Stabilize NOMMU (remove bring-up hacks; prerequisite for real userspace)
++
++### M6.1: Fix syscall ABI correctness
++
++Goal: remove userspace shims (no sign-extension or “special casing” in initramfs).
++
++- [x] Syscall return values behave like Linux expects (negative errno, full-width `long`) without userspace shims.
++  - Evidence: `tools/linxisa/initramfs/smoke.py` expects `cat /no-such` prints `-ENOENT`.
++  - Implementation: QEMU preserves block/queue commit state across ACR transitions; LLVM Blockify does not remap inline-asm operands into the T/U hand queues.
++- [x] Stop using per-syscall bring-up switch hacks in `arch/linx/kernel/traps.c`; route through the normal syscall dispatch safely.
++
++### M6.2: Fix procfs/sysfs directory enumeration
++
++- [ ] `ls /proc` shows expected entries.
++- [ ] `ls /sys` does not loop/garble; `getdents64` behaves correctly (dir offsets / file positions).
++
++### M6.3: Signals minimum viable (still NOMMU)
++
++- [ ] `rt_sigreturn` is not stubbed.
++- [ ] Deliver + return from at least `SIGSEGV` and `SIGILL` in a controlled test.
++
++### M6.4: Remove bring-up debug noise
++
++- [ ] Remove temporary debug printing and early-boot bypasses (explicit list; current sources include `arch/linx/kernel/traps.c` and other early boot paths).
++- [ ] Boot log is “normal Linux noisy,” not debug-spew.
++
++## Section C — Full Linux gap checklist (upstream-like)
++
++Each item below includes “done means” plus at least one concrete test.
++
++### C1: Privilege / exception model completeness
++
++- [ ] Illegal instruction, breakpoint, alignment, and access faults produce correct Linux signals/oops.
++- Tests: userspace fault suite (see “Testing / acceptance” below).
++
++### C2: MMU + virtual memory
++
++- [ ] `CONFIG_MMU=y` boots.
++- [ ] `mmap/munmap/brk` work for real libc.
++- [ ] Page faults, copy-on-write, and `fork()` correctness.
++- Tests: musl `hello`, `fork` test, `mmap` stress microtest.
++
++### C3: SMP + atomics + memory ordering
++
++- [ ] Define/implement atomic ISA primitives required by Linux (or LL/SC) with a documented memory model.
++- [ ] Bring up a second CPU in QEMU + RTL.
++- [ ] Timer IRQ per CPU and IPIs (define mechanism and model it).
++- Tests: Linux `locktorture`, simple pthread contention tests.
++
++### C4: Device / interrupt architecture
++
++- [ ] Define an interrupt controller model (QEMU + RTL) beyond “timer pending bit”.
++- [ ] External interrupts route through Linux IRQ subsystem properly.
++- Tests: interrupt storm/latency microtests; UART RX IRQ (if implemented).
++
++### C5: Virt machine devices for real OS workloads
++
++- [ ] Add a block device (recommend **virtio-mmio** first) so Linux can mount a real rootfs.
++- [ ] (Optional next) virtio-net for networking.
++- Tests: boot with ext4 rootfs; run `init`; run `sh -c 'uname -a; ls'`.
++
++### C6: Toolchain + userspace readiness
++
++- [ ] Clang/LLD (+ binutils if used) produce fully-correct ELF for LinxISA (relocs, TLS, unwind as needed).
++- [ ] Run stock BusyBox (musl static) without kernel/userspace ABI hacks.
++- Tests: `busybox --help`, `ash` script, syscall surface test set.
++
++### C7: Debugging / profiling
++
++- [ ] GDB works end-to-end (QEMU + kernel support).
++- [ ] Ptrace register set stable; core dumps minimally correct.
++- (Optional) perf events, ftrace basics.
++- Tests: attach gdb, single-step across syscall/trap, ptrace read regs.
++
++### C8: Upstreaming hygiene
++
++- [ ] Kconfig/defconfig reasonable.
++- [ ] DT bindings documented if new.
++- [ ] Selftests for arch-specific behavior included.
++- [ ] Docs (ABI + boot protocol + virt machine notes) consistent.
++
++## Section D — QEMU + RTL difftest requirements (per milestone)
++
++### D0: Reference model policy
++
++- **QEMU is the architectural reference** until RTL is proven golden.
++- RTL must match QEMU on the directed tests for each milestone.
++- Any known RTL-vs-QEMU deltas must be explicitly listed (with rationale and a plan to eliminate).
++
++### D1: Commit trace schema (minimal contract)
++
++Use a line-oriented, machine-parseable trace format (recommend: JSONL). Each
++retired instruction emits one record:
++
++- `pc` (u64): architectural PC of retired instruction
++- `insn` (u32/u64): raw encoding (as carried in the ISA)
++- `priv` / `acr` (u32): privilege/ACR level at retirement
++- `reg_writes`: list of `{ reg, value }`
++- `mem_writes`: list of `{ paddr, size, value }`
++- `trap`: null or `{ cause, tval, handler_pc }`
++- `block`: optional Linx Block-ISA metadata `{ brtype, carg, cond, tgt }` when applicable
++
++Minimum to be “difftest useful”:
++
++- PC + reg writes + mem writes + trap cause/arg.
++
++### D2: Milestone-by-milestone difftest gating
++
++For each milestone, define:
++
++- A directed test list (see “Testing / acceptance”).
++- The expected trace fields that must match.
++- Whether timing/interrupt interleaving is deterministic (if not, define “compare rules”).
+ 
+-### M1: Define a LinxISA Linux boot ABI (for QEMU + kernel)
++## Testing / acceptance
+ 
+-Decide and document a stable register ABI for the first-stage boot protocol
+-(similar to RISC-V/ARM64):
++### Current QEMU smoke (already exists)
+ 
+-- [ ] How the kernel receives: hart/cpu id, DTB pointer, initrd pointer/size,
+-      and cmdline pointer/length.
+-- [ ] Whether to use DT at all for `virt` (recommended), vs hard-coded platform.
+-- [ ] Alignment/placement rules for boot blobs (DTB/initrd/cmdline).
+-- [ ] Validate the ABI using `scripts/linxisa/run-linux-bootstub.sh` (prints
+-      `hartid`, `fdt`, and a few `/chosen` + `/memory` properties).
++```bash
++cd /Users/zhoubot/linux
++SKIP_BUILD=1 TIMEOUT=25 python3 tools/linxisa/initramfs/smoke.py
++```
+ 
+-### M2: Linux architecture skeleton (`arch/linx/`) builds
++Expected outcome:
+ 
+-Target outcome: `make ARCH=linx LLVM=1` produces a `vmlinux` that QEMU can load.
++- Reaches `#` prompt and basic commands succeed; no hang/loop.
+ 
+-- [ ] Add `arch/linx/Kconfig` + `arch/linx/Makefile`
+-- [ ] Add `arch/linx/kernel/head.S` that defines `_start`
+-- [ ] Provide minimum required headers in `arch/linx/include/asm/`
+-- [ ] Reach `start_kernel()` and `panic()` with a working stack
++Convenience runner (today: delegates to the smoke test):
+ 
+-### M3: Early console output
++```bash
++cd /Users/zhoubot/linux
++python3 tools/linxisa/tests/run.py
++```
+ 
+-Target outcome: kernel prints reliably on QEMU `-nographic`.
++### Required next: syscall/exception conformance microtests
+ 
+-- [ ] Implement earlycon/early printk using the `virt` UART (`0x10000000`)
+-- [ ] Add a simple `virt` platform description (DT or fixed addresses)
++Add a small suite under:
+ 
+-### M4: Exceptions + timers (still minimal)
++- `/Users/zhoubot/linux/tools/linxisa/tests/` (freestanding + no-libc variants)
+ 
+-- [ ] Basic trap handler (illegal instruction / page faults / breakpoint)
+-- [x] Trap vector base (`EVBASE`) + timer interrupt skeleton
+-- [x] Timer source for `sched_clock()` / clocksource + `jiffies` tick
+-- [ ] `delay` calibration (even a crude one initially)
++Include tests for:
+ 
+-### M5: MMU + memory management
++- syscall return sign correctness (negative errno)
++- `getdents64` correctness on procfs/sysfs
++- signal delivery/return (`SIGILL`, `SIGSEGV`)
++- fork/clone basics (once enabled)
+ 
+-- [ ] Page table format + `paging_init()`
+-- [ ] `ioremap`, `vmalloc`, and basic cache/TLB ops
+-- [ ] `copy_to/from_user` stubs (if no user mode yet, keep minimal)
++### RTL difftest gate (required)
+ 
+-### M6: Boot to userspace
++For each test in the suite:
+ 
+-- [ ] Initramfs loading/passing (QEMU `-initrd` support or built-in initramfs)
+-- [ ] `/init` runs and you get a shell (busybox)
+-- [ ] Clean shutdown path (write exit register or poweroff)
++- QEMU run produces a reference commit trace.
++- RTL run produces a commit trace that matches (or a documented acceptable delta).
+ 
+-## Notes / recommendations
++## Notes
+ 
+-- Keep `virt` minimal: UART-first, no interrupts at the beginning.
+-- Make QEMU and Linux agree on **one** boot ABI early; it saves time later.
+-- Start with a fixed physical load address (`0x10000`) for simplicity; you can
+-  add relocations/PIE once basic boot works.
++- Default ABI: `linx64` only until MMU+SMP stable.
++- Default machine: QEMU `virt`.
++- “Full Linux” requires coordinated changes across:
++  - Linux `arch/linx/`
++  - QEMU Linx CPU + `virt` machine
++  - RTL + trace/difftest infra
++  - Toolchain (relocs + ABI correctness)
+diff --git a/target/linx/cpu.c b/target/linx/cpu.c
+index cc6da8bc34..ccf4ecf166 100644
+--- a/target/linx/cpu.c
++++ b/target/linx/cpu.c
+@@ -10,15 +10,32 @@
+ #include "cpu.h"
+ #include "migration/vmstate.h"
+ #include "exec/cputlb.h"
++#include "exec/memattrs.h"
+ #include "exec/page-protection.h"
+ #include "exec/translation-block.h"
+ #include "exec/target_page.h"
+ #include "exec/log.h"
+ #include "fpu/softfloat-helpers.h"
+ #include "tcg/debug-assert.h"
++#include "accel/accel-cpu-ops.h"
+ #include "accel/tcg/cpu-ops.h"
+ #include "system/runstate.h"
+ #include "qemu/timer.h"
++#include "system/address-spaces.h"
++#include "system/memory.h"
++
++static bool linx_trace_mmu_inited;
++static bool linx_trace_mmu_enabled;
++
++static inline bool linx_trace_mmu(void)
++{
++    if (!linx_trace_mmu_inited) {
++        const char *v = getenv("LINX_TRACE_MMU");
++        linx_trace_mmu_enabled = v && v[0] && strcmp(v, "0") != 0;
++        linx_trace_mmu_inited = true;
++    }
++    return linx_trace_mmu_enabled;
++}
+ 
+ /* Managing-ACR SSR indices (low 12 bits). */
+ enum {
+@@ -32,6 +49,15 @@ enum {
+     LINX_SSR_ETPC     = 0xF0D,
+     LINX_SSR_EBPCN    = 0xF0E,
+     LINX_SSR_TIMECMP  = 0xF21,
++
++    /* ACR1 privileged MMU/IOMMU registers (see linxisa manual). */
++    LINX_SSR_TTBR0    = 0xF10,
++    LINX_SSR_TTBR1    = 0xF11,
++    LINX_SSR_TCR      = 0xF12,
++    LINX_SSR_MAIR     = 0xF13,
++    LINX_SSR_IOTTBR   = 0xF14,
++    LINX_SSR_IOTCR    = 0xF15,
++    LINX_SSR_IOMAIR   = 0xF16,
+ };
+ 
+ /* Common (non-banked) SSR indices. */
+@@ -43,11 +69,49 @@ enum {
+ #define LINX_CSTATE_ACR_MASK 0xFULL
+ #define LINX_CSTATE_I_BIT    (1ULL << 4)
+ 
++/* Trap number encoding (bring-up profile). */
++#define LINX_TRAPNO_E_BIT          (1ULL << 63)
++#define LINX_TRAPNO_CAUSE_SHIFT    8u
++#define LINX_TRAPNO_TRAPNUM_MASK   0xffu
++
++enum {
++    LINX_TRAPNUM_E_DATA  = 2,
++    LINX_TRAPNUM_E_SCALL = 16,
++};
++
++enum {
++    LINX_TRAPCAUSE_CAT_NONE      = 0,
++    LINX_TRAPCAUSE_CAT_MMU_PF    = 1,
++    LINX_TRAPCAUSE_CAT_MMU_PERM  = 2,
++    LINX_TRAPCAUSE_CAT_IOMMU_PF  = 3,
++};
++
++enum {
++    LINX_TRAPCAUSE_ACC_LOAD  = 0,
++    LINX_TRAPCAUSE_ACC_STORE = 1,
++    LINX_TRAPCAUSE_ACC_INST  = 2,
++};
++
++static inline uint8_t linx_trapcause_make(uint8_t cat, uint8_t acc)
++{
++    return (uint8_t)((cat << 4) | (acc & 0xfu));
++}
++
++static inline uint64_t linx_trapno_sync(uint8_t trapnum, uint8_t cause)
++{
++    return LINX_TRAPNO_E_BIT | ((uint64_t)cause << LINX_TRAPNO_CAUSE_SHIFT) | (uint64_t)trapnum;
++}
++
+ /* Simple timer interrupt ID (bring-up). */
+ enum {
+     LINX_IRQ_TIMER0 = 0,
+ };
+ 
++static bool linx_mmu_translate(CPUState *cs, CPULinxState *env, vaddr va,
++                               MMUAccessType access_type, int mmu_idx,
++                               hwaddr *pa_out, int *prot_out,
++                               hwaddr *tlb_size_out, uint8_t *cause_out);
++
+ static inline uint64_t linx_cstate_set_acr(uint64_t cstate, uint32_t acr)
+ {
+     return (cstate & ~LINX_CSTATE_ACR_MASK) | ((uint64_t)acr & LINX_CSTATE_ACR_MASK);
+@@ -77,7 +141,12 @@ static inline void linx_irq_kick_if_allowed(CPUState *cs, CPULinxState *env,
+     if (env->ssr_acr[dst_acr][LINX_SSR_IPENDING] == 0) {
+         return;
+     }
+-    cpu_interrupt(cs, CPU_INTERRUPT_HARD);
++    /*
++     * cpu_interrupt() requires the BQL. Our timer callback can run without the
++     * BQL (e.g. on the virtual clock while executing), so use the lock-free
++     * helper that sets the interrupt request bit and kicks the CPU if needed.
++     */
++    generic_handle_interrupt(cs, CPU_INTERRUPT_HARD);
+ }
+ 
+ static void linx_timer_cb(void *opaque)
+@@ -87,14 +156,40 @@ static void linx_timer_cb(void *opaque)
+     CPULinxState *env = &cpu->env;
+ 
+     /* Set pending bit and raise a hard interrupt. */
+-    env->ssr_acr[0][LINX_SSR_IPENDING] |= (1ull << LINX_IRQ_TIMER0);
+-    linx_irq_kick_if_allowed(cs, env, 0);
++    env->ssr_acr[1][LINX_SSR_IPENDING] |= (1ull << LINX_IRQ_TIMER0);
++    linx_irq_kick_if_allowed(cs, env, 1);
+ }
+ 
+ static hwaddr linx_cpu_get_phys_page_debug(CPUState *cs, vaddr addr)
+ {
+-    /* Linx currently uses simple identity mapping. */
+-    return (hwaddr)addr;
++    LinxCPU *cpu = LINX_CPU(cs);
++    CPULinxState *env = &cpu->env;
++    const uint64_t tcr = env->ssr_acr[1][LINX_SSR_TCR];
++    const bool mme = (tcr & 1u) != 0;
++
++    if (!mme) {
++        /*
++         * NOMMU bring-up uses a small physical address space. Linux currently
++         * uses addresses that may be sign-extended from that width (e.g.
++         * stacks near the top of RAM), so mask to the implemented physical
++         * range for NOMMU.
++         */
++        return (hwaddr)(addr & 0x1fffffffULL);
++    }
++
++    /* Debug translation: attempt a best-effort walk using the current ACR. */
++    hwaddr phys = 0;
++    int prot = 0;
++    hwaddr tlb_size = TARGET_PAGE_SIZE;
++    uint8_t cause = 0;
++    const int mmu_idx = ((env->acr & 0xFu) == 2) ? 1 : 0;
++
++    if (!linx_mmu_translate(cs, env, addr, MMU_DATA_LOAD, mmu_idx,
++                            &phys, &prot, &tlb_size, &cause)) {
++        return (hwaddr)-1;
++    }
++
++    return phys & TARGET_PAGE_MASK;
+ }
+ 
+ static void linx_cpu_do_interrupt(CPUState *cs);
+@@ -111,10 +206,16 @@ static vaddr linx_cpu_get_pc(CPUState *cs)
+     return cpu->env.pc;
+ }
+ 
++#define LINX_TB_FLAG_IN_BODY (1u << 0)
++
+ static TCGTBCPUState linx_get_tb_cpu_state(CPUState *cs)
+ {
+     CPULinxState *env = cpu_env(cs);
+-    return (TCGTBCPUState){ .pc = env->pc, .flags = 0 };
++    uint32_t flags = 0;
++    if (env->in_body) {
++        flags |= LINX_TB_FLAG_IN_BODY;
++    }
++    return (TCGTBCPUState){ .pc = env->pc, .flags = flags };
+ }
+ 
+ static void linx_cpu_synchronize_from_tb(CPUState *cs,
+@@ -151,7 +252,7 @@ static bool linx_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
+     if (interrupt_request & CPU_INTERRUPT_HARD) {
+         /* Route all external interrupts to EXCP_INTERRUPT for now. */
+         cs->exception_index = EXCP_INTERRUPT;
+-        if (!linx_irq_allowed(cpu_env(cs), 0)) {
++        if (!linx_irq_allowed(cpu_env(cs), 1)) {
+             /* Leave the interrupt request pending until it becomes allowed. */
+             cs->exception_index = -1;
+             return false;
+@@ -210,40 +311,76 @@ static void linx_cpu_do_interrupt(CPUState *cs)
+     case LINX_EXCP_INST_ACCESS_FAULT:
+     case LINX_EXCP_LOAD_ACCESS_FAULT:
+     case LINX_EXCP_STORE_ACCESS_FAULT:
+-        qemu_log_mask(LOG_GUEST_ERROR,
+-                      "Linx: memory access fault at PC=0x%" PRIx64 "\n",
+-                      last_pc);
++    {
++        /*
++         * MMU/IOMMU faults are delivered as a synchronous E_DATA trap.
++         * pending_trap_arg0/cause is populated by the MMU/IOMMU code.
++         */
++        const uint32_t src_acr = env->acr & 0xFu;
++        const uint32_t dst_acr = (src_acr == 0) ? 0 : 1;
++
++        linx_acr_save_block_state(env, src_acr);
++        linx_acr_restore_block_state(env, dst_acr);
++
++        const uint64_t evbase = env->ssr_acr[dst_acr][LINX_SSR_EVBASE];
++
++        env->ssr_acr[dst_acr][LINX_SSR_ECSTATE] = env->ssr[LINX_SSR_CSTATE];
++        env->ssr_acr[dst_acr][LINX_SSR_EBPC] = env->bpc;
++        env->ssr_acr[dst_acr][LINX_SSR_ETPC] = last_pc;
++        env->ssr_acr[dst_acr][LINX_SSR_EBPCN] = env->bpc;
++        env->ssr_acr[dst_acr][LINX_SSR_TRAPNO] =
++            linx_trapno_sync(LINX_TRAPNUM_E_DATA, (uint8_t)env->pending_trap_cause);
++        env->ssr_acr[dst_acr][LINX_SSR_TRAPARG0] = env->pending_trap_arg0;
++
++        env->pending_trap_arg0 = 0;
++        env->pending_trap_cause = 0;
++
++        env->ssr[LINX_SSR_CSTATE] &= ~LINX_CSTATE_I_BIT;
++        env->acr = dst_acr;
++        env->ssr[LINX_SSR_CSTATE] = linx_cstate_set_acr(env->ssr[LINX_SSR_CSTATE], dst_acr);
++        env->pc = evbase ? evbase : last_pc;
+         cs->exception_index = -1;
+-        cpu_abort(cs, "Linx: Memory access fault");
+         return;
++    }
+ 
+     case EXCP_INTERRUPT:
++    {
+         /*
+          * Hardware interrupt (bring-up).
+          *
+-         * Model this as an asynchronous SERVICE_REQUEST routed to ACR0:
+-         * save minimal trap state into ACR0's managing SSR bank and vector
+-         * to EVBASE_ACR0.
++         * Model this as an asynchronous SERVICE_REQUEST routed to ACR1.
+          */
+         cpu_reset_interrupt(cs, CPU_INTERRUPT_HARD);
+ 
+-        const uint64_t evbase = env->ssr_acr[0][LINX_SSR_EVBASE];
++        /*
++         * Preserve block/queue state for the interrupted ACR and restore ACR0's
++         * state before vectoring. This keeps mid-block interrupts precise and
++         * avoids clobbering the trapped context's commit metadata.
++         */
++        const uint32_t src_acr = env->acr & 0xFu;
++        const uint32_t dst_acr = 1;
+ 
+-        /* Save trap source state into ACR0 bank. */
+-        env->ssr_acr[0][LINX_SSR_ECSTATE] = env->ssr[LINX_SSR_CSTATE];
+-        env->ssr_acr[0][LINX_SSR_EBPC] = last_pc;
+-        env->ssr_acr[0][LINX_SSR_ETPC] = last_pc;
+-        env->ssr_acr[0][LINX_SSR_EBPCN] = last_pc;
+-        env->ssr_acr[0][LINX_SSR_TRAPNO] = 0; /* profile-defined */
+-        env->ssr_acr[0][LINX_SSR_TRAPARG0] = LINX_IRQ_TIMER0;
++        linx_acr_save_block_state(env, src_acr);
++        linx_acr_restore_block_state(env, dst_acr);
+ 
+-        /* Switch to ACR0 and vector. */
++        const uint64_t evbase = env->ssr_acr[dst_acr][LINX_SSR_EVBASE];
++
++        /* Save trap source state into managing ACR bank. */
++        env->ssr_acr[dst_acr][LINX_SSR_ECSTATE] = env->ssr[LINX_SSR_CSTATE];
++        env->ssr_acr[dst_acr][LINX_SSR_EBPC] = env->bpc;
++        env->ssr_acr[dst_acr][LINX_SSR_ETPC] = last_pc;
++        env->ssr_acr[dst_acr][LINX_SSR_EBPCN] = env->bpc;
++        env->ssr_acr[dst_acr][LINX_SSR_TRAPNO] = 0; /* profile-defined */
++        env->ssr_acr[dst_acr][LINX_SSR_TRAPARG0] = LINX_IRQ_TIMER0;
++
++        /* Switch to managing ring and vector. */
+         env->ssr[LINX_SSR_CSTATE] &= ~LINX_CSTATE_I_BIT;
+-        env->acr = 0;
+-        env->ssr[LINX_SSR_CSTATE] = linx_cstate_set_acr(env->ssr[LINX_SSR_CSTATE], 0);
++        env->acr = dst_acr;
++        env->ssr[LINX_SSR_CSTATE] = linx_cstate_set_acr(env->ssr[LINX_SSR_CSTATE], dst_acr);
+         env->pc = evbase ? evbase : last_pc;
+         cs->exception_index = -1;
+         return;
++    }
+ 
+     default:
+         /* Check if it's a generic QEMU exception that we should handle */
+@@ -280,21 +417,307 @@ static vaddr linx_pointer_wrap(CPUState *cs, int mmu_idx, vaddr result, vaddr ba
+ 
+ static int linx_cpu_mmu_index(CPUState *cs, bool ifunc)
+ {
+-    return 0;
++    CPULinxState *env = cpu_env(cs);
++    return ((env->acr & 0xFu) == 2) ? 1 : 0;
++}
++
++static inline bool linx_va_is_canonical(vaddr va)
++{
++    const uint64_t top = ((uint64_t)va >> 48) & 0xffffu;
++    const uint64_t sign = ((uint64_t)va >> 47) & 1u;
++    return top == (sign ? 0xffffu : 0x0000u);
++}
++
++static inline uint8_t linx_fault_acc(MMUAccessType access_type)
++{
++    switch (access_type) {
++    case MMU_INST_FETCH:
++        return LINX_TRAPCAUSE_ACC_INST;
++    case MMU_DATA_STORE:
++        return LINX_TRAPCAUSE_ACC_STORE;
++    case MMU_DATA_LOAD:
++    default:
++        return LINX_TRAPCAUSE_ACC_LOAD;
++    }
++}
++
++static bool linx_mmu_translate(CPUState *cs, CPULinxState *env, vaddr va,
++                               MMUAccessType access_type, int mmu_idx,
++                               hwaddr *pa_out, int *prot_out,
++                               hwaddr *tlb_size_out, uint8_t *cause_out)
++{
++    (void)cs;
++    const uint64_t tcr = env->ssr_acr[1][LINX_SSR_TCR];
++    const bool mme = (tcr & 1u) != 0;
++    const uint8_t acc = linx_fault_acc(access_type);
++
++    if (!mme) {
++        /* Identity mapping for NOMMU / MME=0. */
++        *pa_out = (hwaddr)(va & 0x1fffffffULL);
++        *prot_out = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
++        *tlb_size_out = TARGET_PAGE_SIZE;
++        *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_NONE, acc);
++        return true;
++    }
++
++    if (!linx_va_is_canonical(va)) {
++        *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++        return false;
++    }
++
++    /* v0.1 bring-up profile: only 48-bit VA supported (T0SZ/T1SZ must be 16). */
++    const uint32_t t0sz = (uint32_t)((tcr >> 1) & 0x3fu);
++    const uint32_t t1sz = (uint32_t)((tcr >> 7) & 0x3fu);
++    if (t0sz != 16 || t1sz != 16) {
++        *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++        return false;
++    }
++
++    const uint32_t epd0 = (uint32_t)((tcr >> 13) & 1u);
++    const uint32_t epd1 = (uint32_t)((tcr >> 14) & 1u);
++    const bool use_ttbr1 = (((uint64_t)va >> 47) & 1u) != 0;
++
++    if (!use_ttbr1 && epd0) {
++        *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++        return false;
++    }
++    if (use_ttbr1 && epd1) {
++        *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++        return false;
++    }
++
++    const uint64_t ttbr = use_ttbr1 ? env->ssr_acr[1][LINX_SSR_TTBR1]
++                                    : env->ssr_acr[1][LINX_SSR_TTBR0];
++    if ((ttbr & 0xfffu) != 0) {
++        *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++        return false;
++    }
++
++    hwaddr table = (hwaddr)(ttbr & 0x0000fffffffff000ULL);
++
++    /* Walk L0..L3. */
++    for (int level = 0; level < 4; level++) {
++        const uint32_t shift = 39u - (uint32_t)level * 9u;
++        const uint64_t idx = (((uint64_t)va) >> shift) & 0x1ffu;
++        const hwaddr desc_addr = table + (hwaddr)(idx * 8u);
++        MemTxResult result = MEMTX_OK;
++        const uint64_t desc = address_space_ldq_le(&address_space_memory, desc_addr,
++                                                   MEMTXATTRS_UNSPECIFIED, &result);
++        if (result != MEMTX_OK) {
++            *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++            return false;
++        }
++
++        const uint32_t type = (uint32_t)(desc & 0x3u);
++        if (type == 0) {
++            *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++            return false;
++        }
++
++        if (type == 3) {
++            /* Table descriptor: Desc[1:0]=11. */
++            if ((desc & 0xffcULL) != 0) {
++                *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++                return false;
++            }
++            if ((desc >> 48) != 0) {
++                *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++                return false;
++            }
++            table = (hwaddr)(desc & 0x0000fffffffff000ULL);
++            continue;
++        }
++
++        /* Leaf descriptor: Page at L3, Block at L1/L2 (optional). */
++        if (level == 0) {
++            *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++            return false;
++        }
++
++        hwaddr block_size = TARGET_PAGE_SIZE;
++        if (type == 2) {
++            if (level == 1) {
++                block_size = (hwaddr)1ull << 30; /* 1 GiB */
++            } else if (level == 2) {
++                block_size = (hwaddr)1ull << 21; /* 2 MiB */
++            } else {
++                *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++                return false;
++            }
++        } else if (type == 1) {
++            if (level != 3) {
++                *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++                return false;
++            }
++        } else {
++            *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++            return false;
++        }
++
++        const hwaddr out_base = (hwaddr)(desc & 0x0000fffffffff000ULL);
++        if ((desc >> 48) != 0) {
++            *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++            return false;
++        }
++        if ((out_base & (block_size - 1u)) != 0) {
++            *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++            return false;
++        }
++
++        /* Reserved bits for leaf descriptors. */
++        if ((desc & (3ull << 10)) != 0) {
++            *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++            return false;
++        }
++
++        const uint32_t attridx = (uint32_t)((desc >> 7) & 0x7u);
++        if (attridx > 2u) {
++            *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++            return false;
++        }
++
++        const bool af = ((desc >> 6) & 1u) != 0;
++        if (!af) {
++            *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++            return false;
++        }
++
++        const bool u = ((desc >> 5) & 1u) != 0;
++        const bool x = ((desc >> 4) & 1u) != 0;
++        const bool w = ((desc >> 3) & 1u) != 0;
++        const bool r = ((desc >> 2) & 1u) != 0;
++
++        if (mmu_idx == 1 && !u) {
++            *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PERM, acc);
++            return false;
++        }
++        if (access_type == MMU_INST_FETCH && !x) {
++            *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PERM, acc);
++            return false;
++        }
++        if (access_type == MMU_DATA_LOAD && !r) {
++            *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PERM, acc);
++            return false;
++        }
++        if (access_type == MMU_DATA_STORE && !w) {
++            *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PERM, acc);
++            return false;
++        }
++
++        const hwaddr pa = out_base | (hwaddr)((uint64_t)va & (uint64_t)(block_size - 1u));
++        if (((uint64_t)pa >> 48) != 0) {
++            *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++            return false;
++        }
++
++        int prot = 0;
++        if (r) {
++            prot |= PAGE_READ;
++        }
++        if (w) {
++            prot |= PAGE_WRITE;
++        }
++        if (x) {
++            prot |= PAGE_EXEC;
++        }
++
++        *pa_out = pa;
++        *prot_out = prot;
++        *tlb_size_out = block_size;
++        *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_NONE, acc);
++        return true;
++    }
++
++    *cause_out = linx_trapcause_make(LINX_TRAPCAUSE_CAT_MMU_PF, acc);
++    return false;
+ }
+ 
+ static bool linx_cpu_tlb_fill(CPUState *cs, vaddr addr, int size,
+                               MMUAccessType access_type, int mmu_idx,
+                               bool probe, uintptr_t retaddr)
+ {
+-    /* Simple identity mapping: virtual address = physical address */
+-    hwaddr phys_addr = addr;
+-    vaddr page = addr & TARGET_PAGE_MASK;
+-    hwaddr phys_page = phys_addr & TARGET_PAGE_MASK;
+-    int prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
+-
+-    tlb_set_page(cs, page, phys_page, prot, mmu_idx, TARGET_PAGE_SIZE);
+-    return true;
++    /*
++     * Simple identity mapping (NOMMU), but with address masking to support the
++     * bring-up convention of sign-extended physical addresses.
++     */
++    CPULinxState *env = cpu_env(cs);
++    hwaddr pa = 0;
++    int prot = 0;
++    hwaddr tlb_size = TARGET_PAGE_SIZE;
++    uint8_t cause = 0;
++
++    if (linx_trace_mmu()) {
++        static int count;
++        if (count++ < 128) {
++            const uint64_t tcr = env->ssr_acr[1][LINX_SSR_TCR];
++            fprintf(stderr,
++                    "linx: tlb_fill addr=0x%016" PRIx64 " access=%d mmu_idx=%d probe=%d tcr=0x%016" PRIx64 " acr=%u\n",
++                    (uint64_t)addr, access_type, mmu_idx, probe ? 1 : 0,
++                    tcr, env->acr & 0xFu);
++            fflush(stderr);
++        }
++    }
++
++    if (linx_mmu_translate(cs, env, addr, access_type, mmu_idx,
++                           &pa, &prot, &tlb_size, &cause)) {
++        /*
++         * Bring-up: map only TARGET_PAGE_SIZE granularity in the softmmu TLB,
++         * even when the page table descriptor is a larger block mapping.
++         *
++         * This avoids relying on large-page TLB support while the Linx MMU
++         * model is still stabilizing.
++         */
++        hwaddr map_size = tlb_size;
++        if (map_size > TARGET_PAGE_SIZE) {
++            map_size = TARGET_PAGE_SIZE;
++        }
++        vaddr vbase = addr & ~(vaddr)(map_size - 1u);
++        hwaddr pbase = pa & ~(hwaddr)(map_size - 1u);
++        if (linx_trace_mmu()) {
++            static int count_ok;
++            if (count_ok++ < 128) {
++                fprintf(stderr,
++                        "linx: tlb_ok  va=0x%016" PRIx64 " -> pa=0x%016" HWADDR_PRIx
++                        " size=0x%016" HWADDR_PRIx " prot=0x%x\n",
++                        (uint64_t)addr, pa, map_size, prot);
++                fflush(stderr);
++            }
++        }
++        tlb_set_page(cs, vbase, pbase, prot, mmu_idx, map_size);
++        if (linx_trace_mmu()) {
++            static int count_set;
++            if (count_set++ < 128) {
++                fprintf(stderr,
++                        "linx: tlb_set va_base=0x%016" PRIx64 " pa_base=0x%016" HWADDR_PRIx
++                        " size=0x%016" HWADDR_PRIx "\n",
++                        (uint64_t)vbase, pbase, map_size);
++                fflush(stderr);
++            }
++        }
++        return true;
++    }
++
++    if (probe) {
++        return false;
++    }
++
++    env->pending_trap_arg0 = (uint64_t)addr;
++    env->pending_trap_cause = (uint32_t)cause;
++
++    switch (access_type) {
++    case MMU_INST_FETCH:
++        cs->exception_index = LINX_EXCP_INST_ACCESS_FAULT;
++        break;
++    case MMU_DATA_STORE:
++        cs->exception_index = LINX_EXCP_STORE_ACCESS_FAULT;
++        break;
++    case MMU_DATA_LOAD:
++    default:
++        cs->exception_index = LINX_EXCP_LOAD_ACCESS_FAULT;
++        break;
++    }
++
++    cpu_loop_exit_restore(cs, retaddr);
+ }
+ 
+ static void linx_cpu_dump_state(CPUState *cs, FILE *f, int flags)
+@@ -412,8 +835,8 @@ static const TCGCPUOps linx_tcg_ops = {
+ 
+ static const VMStateDescription vmstate_linx_cpu = {
+     .name = "linx_cpu",
+-    .version_id = 5,
+-    .minimum_version_id = 5,
++    .version_id = 8,
++    .minimum_version_id = 8,
+     .fields = (const VMStateField[]) {
+         VMSTATE_UINT64(env.pc, LinxCPU),
+         VMSTATE_UINT32(env.cond, LinxCPU),
+@@ -421,6 +844,20 @@ static const VMStateDescription vmstate_linx_cpu = {
+         VMSTATE_UINT32(env.carg, LinxCPU),
+         VMSTATE_UINT32(env.brtype, LinxCPU),
+         VMSTATE_UINT32(env.blocktype, LinxCPU),
++        VMSTATE_UINT64(env.body_tpc, LinxCPU),
++        VMSTATE_UINT64(env.return_pc, LinxCPU),
++        VMSTATE_UINT32(env.in_body, LinxCPU),
++        VMSTATE_UINT64(env.tmpl_pc, LinxCPU),
++        VMSTATE_UINT32(env.tmpl_kind, LinxCPU),
++        VMSTATE_UINT32(env.tmpl_step, LinxCPU),
++        VMSTATE_UINT32(env.tmpl_reg_cur, LinxCPU),
++        VMSTATE_UINT32(env.tmpl_reg_begin, LinxCPU),
++        VMSTATE_UINT32(env.tmpl_reg_end, LinxCPU),
++        VMSTATE_UINT64(env.tmpl_stacksize, LinxCPU),
++        VMSTATE_UINT64(env.tmpl_mem_dst, LinxCPU),
++        VMSTATE_UINT64(env.tmpl_mem_src, LinxCPU),
++        VMSTATE_UINT64(env.tmpl_mem_remaining, LinxCPU),
++        VMSTATE_UINT64(env.tmpl_mem_value, LinxCPU),
+         VMSTATE_UINT32(env.fcsr, LinxCPU),
+         VMSTATE_UINT32(env.acr, LinxCPU),
+         VMSTATE_UINT64_ARRAY(env.gpr, LinxCPU, LINX_GPR_COUNT),
+diff --git a/target/linx/cpu.h b/target/linx/cpu.h
+index 4615d202d7..2d38017789 100644
+--- a/target/linx/cpu.h
++++ b/target/linx/cpu.h
+@@ -47,9 +47,77 @@ enum {
+     LINX_GPR_COUNT = 24,
+ };
+ 
++/*
++ * Template block kinds (bring-up subset).
++ *
++ * These are standalone blocks (block start markers) that execute via the
++ * restartable template generator model.
++ */
++typedef enum LinxTemplateKind {
++    LINX_TEMPLATE_FENTRY   = 0,
++    LINX_TEMPLATE_FEXIT    = 1,
++    LINX_TEMPLATE_FRET_RA  = 2,
++    LINX_TEMPLATE_FRET_STK = 3,
++    LINX_TEMPLATE_MCOPY    = 4,
++    LINX_TEMPLATE_MSET     = 5,
++} LinxTemplateKind;
++
+ #define LINX_SSR_COUNT 0x1000u /* SSR_ID[11:0] */
+ #define LINX_ACR_COUNT 16u     /* ACR0..ACR15 */
+ 
++/*
++ * Block/queue state that must be preserved across ACR transitions.
++ *
++ * The Linx Block ISA defines architectural commit at block boundaries. Traps
++ * (SERVICE_REQUEST/interrupts) can occur mid-block and return to the trapped
++ * context at the next PC, so the block commit metadata and hand queues must be
++ * restored when switching back to the target ACR.
++ */
++typedef struct LinxAcrBlockState {
++    uint64_t tq[4];
++    uint64_t uq[4];
++
++    uint64_t bpc;
++
++    uint64_t tgt;
++    uint32_t cond;
++    uint32_t carg;
++    uint32_t brtype;
++    uint32_t blocktype;
++
++    /* Decoupled-block state (B.TEXT out-of-line bodies). */
++    uint64_t body_tpc;
++    uint64_t return_pc;
++    uint32_t in_body;
++
++    /* Restartable template state (bring-up subset). */
++    uint64_t tmpl_pc;
++    uint32_t tmpl_kind;
++    uint32_t tmpl_step;
++    uint32_t tmpl_reg_cur;
++    uint32_t tmpl_reg_begin;
++    uint32_t tmpl_reg_end;
++    uint64_t tmpl_stacksize;
++    uint64_t tmpl_mem_dst;
++    uint64_t tmpl_mem_src;
++    uint64_t tmpl_mem_remaining;
++    uint64_t tmpl_mem_value;
++
++    uint64_t lb[3]; /* LB0..LB2 */
++
++    /* Tile block state (minimal bring-up subset). */
++    uint32_t tile_func;
++    uint32_t tile_dtype;
++    uint32_t tile_iot_valid;
++    uint32_t tile_iot_flags;
++    uint32_t tile_iot_dst;
++    uint32_t tile_iot_grp;
++    uint32_t tile_iot_src0;
++    uint32_t tile_iot_src1;
++    uint32_t tile_iot_reg;
++    uint32_t tile_iot_size;
++} LinxAcrBlockState;
++
+ typedef struct CPUArchState {
+     uint64_t gpr[LINX_GPR_COUNT];
+     uint64_t tq[4];
+@@ -81,9 +149,30 @@ typedef struct CPUArchState {
+     uint32_t brtype;
+     uint32_t blocktype;
+ 
++    /* Decoupled-block state (B.TEXT out-of-line bodies). */
++    uint64_t body_tpc;
++    uint64_t return_pc;
++    uint32_t in_body;
++
++    /* Restartable template state (bring-up subset). */
++    uint64_t tmpl_pc;
++    uint32_t tmpl_kind;
++    uint32_t tmpl_step;
++    uint32_t tmpl_reg_cur;
++    uint32_t tmpl_reg_begin;
++    uint32_t tmpl_reg_end;
++    uint64_t tmpl_stacksize;
++    uint64_t tmpl_mem_dst;
++    uint64_t tmpl_mem_src;
++    uint64_t tmpl_mem_remaining;
++    uint64_t tmpl_mem_value;
++
+     /* Block argument registers (set via B.DIM / C.B.DIM*). */
+     uint64_t lb[3]; /* LB0..LB2 */
+ 
++    /* Saved block/queue state per ACR for trap/return correctness. */
++    LinxAcrBlockState acr_block_state[LINX_ACR_COUNT];
++
+     /*
+      * Tile block state (TAU bring-up).
+      *
+@@ -106,11 +195,18 @@ typedef struct CPUArchState {
+     uint32_t tile_reg[32][1024]; /* 4KB per tile (1024 x i32 words). */
+     uint32_t tile_acc[1024];     /* 4KB accumulator (bring-up). */
+ 
++    /* Current block start marker address (BPC) for trap reporting. */
++    uint64_t bpc;
++
+     uint64_t pc;
+ 
+     /* Dynamic instruction counter (for benchmarking/bring-up). */
+     uint64_t insn_count;
+ 
++    /* Pending trap reporting for synchronous faults (MMU/IOMMU). */
++    uint64_t pending_trap_arg0;
++    uint32_t pending_trap_cause;
++
+     /* LR/SC reservation state (bring-up model). */
+     uint64_t lr_addr;
+     uint32_t lr_size;
+@@ -127,6 +223,116 @@ typedef struct CPUArchState {
+     struct QEMUTimer *timer;
+ } CPULinxState;
+ 
++static inline void linx_acr_save_block_state(CPULinxState *env, uint32_t acr)
++{
++    LinxAcrBlockState *s;
++    int i;
++
++    if (acr >= LINX_ACR_COUNT) {
++        return;
++    }
++    s = &env->acr_block_state[acr];
++
++    for (i = 0; i < 4; i++) {
++        s->tq[i] = env->tq[i];
++        s->uq[i] = env->uq[i];
++    }
++
++    s->bpc = env->bpc;
++
++    s->tgt = env->tgt;
++    s->cond = env->cond;
++    s->carg = env->carg;
++    s->brtype = env->brtype;
++    s->blocktype = env->blocktype;
++
++    s->body_tpc = env->body_tpc;
++    s->return_pc = env->return_pc;
++    s->in_body = env->in_body;
++
++    s->tmpl_pc = env->tmpl_pc;
++    s->tmpl_kind = env->tmpl_kind;
++    s->tmpl_step = env->tmpl_step;
++    s->tmpl_reg_cur = env->tmpl_reg_cur;
++    s->tmpl_reg_begin = env->tmpl_reg_begin;
++    s->tmpl_reg_end = env->tmpl_reg_end;
++    s->tmpl_stacksize = env->tmpl_stacksize;
++    s->tmpl_mem_dst = env->tmpl_mem_dst;
++    s->tmpl_mem_src = env->tmpl_mem_src;
++    s->tmpl_mem_remaining = env->tmpl_mem_remaining;
++    s->tmpl_mem_value = env->tmpl_mem_value;
++
++    for (i = 0; i < 3; i++) {
++        s->lb[i] = env->lb[i];
++    }
++
++    s->tile_func = env->tile_func;
++    s->tile_dtype = env->tile_dtype;
++    s->tile_iot_valid = env->tile_iot_valid;
++    s->tile_iot_flags = env->tile_iot_flags;
++    s->tile_iot_dst = env->tile_iot_dst;
++    s->tile_iot_grp = env->tile_iot_grp;
++    s->tile_iot_src0 = env->tile_iot_src0;
++    s->tile_iot_src1 = env->tile_iot_src1;
++    s->tile_iot_reg = env->tile_iot_reg;
++    s->tile_iot_size = env->tile_iot_size;
++}
++
++static inline void linx_acr_restore_block_state(CPULinxState *env, uint32_t acr)
++{
++    const LinxAcrBlockState *s;
++    int i;
++
++    if (acr >= LINX_ACR_COUNT) {
++        return;
++    }
++    s = &env->acr_block_state[acr];
++
++    for (i = 0; i < 4; i++) {
++        env->tq[i] = s->tq[i];
++        env->uq[i] = s->uq[i];
++    }
++
++    env->bpc = s->bpc;
++
++    env->tgt = s->tgt;
++    env->cond = s->cond;
++    env->carg = s->carg;
++    env->brtype = s->brtype;
++    env->blocktype = s->blocktype;
++
++    env->body_tpc = s->body_tpc;
++    env->return_pc = s->return_pc;
++    env->in_body = s->in_body;
++
++    env->tmpl_pc = s->tmpl_pc;
++    env->tmpl_kind = s->tmpl_kind;
++    env->tmpl_step = s->tmpl_step;
++    env->tmpl_reg_cur = s->tmpl_reg_cur;
++    env->tmpl_reg_begin = s->tmpl_reg_begin;
++    env->tmpl_reg_end = s->tmpl_reg_end;
++    env->tmpl_stacksize = s->tmpl_stacksize;
++    env->tmpl_mem_dst = s->tmpl_mem_dst;
++    env->tmpl_mem_src = s->tmpl_mem_src;
++    env->tmpl_mem_remaining = s->tmpl_mem_remaining;
++    env->tmpl_mem_value = s->tmpl_mem_value;
++
++    for (i = 0; i < 3; i++) {
++        env->lb[i] = s->lb[i];
++    }
++
++    env->tile_func = s->tile_func;
++    env->tile_dtype = s->tile_dtype;
++    env->tile_iot_valid = s->tile_iot_valid;
++    env->tile_iot_flags = s->tile_iot_flags;
++    env->tile_iot_dst = s->tile_iot_dst;
++    env->tile_iot_grp = s->tile_iot_grp;
++    env->tile_iot_src0 = s->tile_iot_src0;
++    env->tile_iot_src1 = s->tile_iot_src1;
++    env->tile_iot_reg = s->tile_iot_reg;
++    env->tile_iot_size = s->tile_iot_size;
++}
++
+ /*
+  * LinxCPU:
+  * @env: #CPULinxState
+diff --git a/target/linx/helper.c b/target/linx/helper.c
+index 2fe1074cbb..dacbe600cc 100644
+--- a/target/linx/helper.c
++++ b/target/linx/helper.c
+@@ -9,12 +9,20 @@
+ #include "exec/helper-proto.h"
+ #include "exec/log.h"
+ #include "accel/tcg/cpu-ldst.h"
++#include "accel/accel-cpu-ops.h"
+ #include "fpu/softfloat-helpers.h"
+ #include "qemu/main-loop.h"
+ #include "qemu/timer.h"
+ #include "system/runstate.h"
+ #include "exec/memopidx.h"
+ #include "accel/tcg/cpu-ldst-common.h"
++#include "exec/cputlb.h"
++#include "exec/target_page.h"
++#include "system/address-spaces.h"
++#include "system/memory.h"
++
++/* Configured in target/linx/translate.c from $LINX_CALLFRAME_SIZE. */
++extern uint64_t linx_callframe_size;
+ 
+ /* Semihosting operations via EBREAK immediate */
+ #define LINX_SEMIHOST_EXIT      0  /* Exit program */
+@@ -47,10 +55,30 @@ enum {
+     LINX_SSR_EBARG    = 0xF0C,
+     LINX_SSR_ETPC     = 0xF0D,
+     LINX_SSR_EBPCN    = 0xF0E,
++    LINX_SSR_TTBR0    = 0xF10,
++    LINX_SSR_TTBR1    = 0xF11,
++    LINX_SSR_TCR      = 0xF12,
++    LINX_SSR_MAIR     = 0xF13,
++    LINX_SSR_IOTTBR   = 0xF14,
++    LINX_SSR_IOTCR    = 0xF15,
++    LINX_SSR_IOMAIR   = 0xF16,
+     LINX_SSR_TIMER_TIME   = 0xF20,
+     LINX_SSR_TIMER_TIMECMP = 0xF21,
+ };
+ 
++/* Trap number encoding (bring-up profile; keep in sync with target/linx/cpu.c). */
++#define LINX_TRAPNO_E_BIT       (1ULL << 63)
++#define LINX_TRAPNO_CAUSE_SHIFT 8u
++
++enum {
++    LINX_TRAPNUM_E_SCALL = 16,
++};
++
++static inline uint64_t linx_trapno_sync(uint8_t trapnum, uint8_t cause)
++{
++    return LINX_TRAPNO_E_BIT | ((uint64_t)cause << LINX_TRAPNO_CAUSE_SHIFT) | (uint64_t)trapnum;
++}
++
+ /*
+  * CSTATE (bring-up encoding).
+  *
+@@ -105,7 +133,11 @@ static inline void linx_irq_kick_if_allowed(CPULinxState *env, uint32_t dst_acr)
+     if (env->ssr_acr[dst_acr][LINX_SSR_IPENDING] == 0) {
+         return;
+     }
+-    cpu_interrupt(cs, CPU_INTERRUPT_HARD);
++    /*
++     * Service requests/SSR-side interrupt injection can happen while the vCPU
++     * thread is executing without the BQL. Use the lock-free helper.
++     */
++    generic_handle_interrupt(cs, CPU_INTERRUPT_HARD);
+ }
+ 
+ /* ACRC request_type values (v0.1 draft). */
+@@ -179,6 +211,46 @@ void HELPER(linx_ssr_write)(CPULinxState *env, uint32_t ssrid, uint64_t value)
+                 return;
+             }
+ 
++            if (bank == 1) {
++                /*
++                 * ACR1 privileged MMU/IOMMU programming registers: validate the
++                 * v0.1 bring-up subset and flush translations on updates.
++                 */
++                if (idx == LINX_SSR_TCR) {
++                    const uint64_t allowed =
++                        (1ull << 0) | (0x3full << 1) | (0x3full << 7) |
++                        (1ull << 13) | (1ull << 14) | (1ull << 15);
++                    if ((value & ~allowed) != 0) {
++                        CPUState *cs = env_cpu(env);
++                        cs->exception_index = LINX_EXCP_ILLEGAL_INST;
++                        cpu_loop_exit(cs);
++                    }
++                    env->ssr_acr[bank][idx] = value;
++                    tlb_flush(env_cpu(env));
++                    return;
++                }
++                if (idx == LINX_SSR_IOTCR) {
++                    const uint64_t allowed = (1ull << 0) | (0x3full << 1);
++                    if ((value & ~allowed) != 0) {
++                        CPUState *cs = env_cpu(env);
++                        cs->exception_index = LINX_EXCP_ILLEGAL_INST;
++                        cpu_loop_exit(cs);
++                    }
++                    env->ssr_acr[bank][idx] = value;
++                    return;
++                }
++                if (idx == LINX_SSR_TTBR0 || idx == LINX_SSR_TTBR1 || idx == LINX_SSR_IOTTBR) {
++                    if ((value & 0xfffu) != 0) {
++                        CPUState *cs = env_cpu(env);
++                        cs->exception_index = LINX_EXCP_ILLEGAL_INST;
++                        cpu_loop_exit(cs);
++                    }
++                    env->ssr_acr[bank][idx] = value;
++                    tlb_flush(env_cpu(env));
++                    return;
++                }
++            }
++
+             if (idx == LINX_SSR_EOIEI) {
+                 /*
+                  * End of interrupt (v0.1 draft): clear the pending bit for the
+@@ -201,19 +273,19 @@ void HELPER(linx_ssr_write)(CPULinxState *env, uint32_t ssrid, uint64_t value)
+                  */
+                 env->ssr_acr[bank][idx] = value;
+ 
+-                if (bank == 0 && env->timer) {
++                if (bank == 1 && env->timer) {
+                     CPUState *cs = env_cpu(env);
+                     if (value == 0) {
+                         timer_del(env->timer);
+-                        env->ssr_acr[0][LINX_SSR_IPENDING] &= ~(1ull << 0);
++                        env->ssr_acr[1][LINX_SSR_IPENDING] &= ~(1ull << 0);
+                         cpu_reset_interrupt(cs, CPU_INTERRUPT_HARD);
+                         return;
+                     }
+ 
+                     const uint64_t now = (uint64_t)qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+                     if (value <= now) {
+-                        env->ssr_acr[0][LINX_SSR_IPENDING] |= (1ull << 0);
+-                        linx_irq_kick_if_allowed(env, 0);
++                        env->ssr_acr[1][LINX_SSR_IPENDING] |= (1ull << 0);
++                        linx_irq_kick_if_allowed(env, 1);
+                         return;
+                     }
+                     timer_mod_ns(env->timer, (int64_t)value);
+@@ -252,7 +324,7 @@ void HELPER(linx_service_request)(CPULinxState *env, uint32_t request_type,
+                   " pc_next=0x%" PRIx64 "\n",
+                   src_acr, request_type, bpc, tpc, pc_next);
+ 
+-    /* ACRC request_type validity + routing (v0.1 draft). */
++    /* ACRC request_type validity + routing (v0.1 draft; see manual). */
+     if (src_acr == 1) {
+         if (request_type != LINX_SCT_MAC && request_type != LINX_SCT_SEC) {
+             cs->exception_index = LINX_EXCP_ILLEGAL_INST;
+@@ -260,24 +332,27 @@ void HELPER(linx_service_request)(CPULinxState *env, uint32_t request_type,
+         }
+         dst_acr = 0;
+     } else if (src_acr == 2) {
+-        if (request_type != LINX_SCT_MAC &&
+-            request_type != LINX_SCT_SYS &&
+-            request_type != LINX_SCT_SEC) {
++        if (request_type != LINX_SCT_MAC && request_type != LINX_SCT_SYS && request_type != LINX_SCT_SEC) {
+             cs->exception_index = LINX_EXCP_ILLEGAL_INST;
+             cpu_loop_exit(cs);
+         }
+-        /*
+-         * Linux bring-up model: route all user SERVICE_REQUEST traps to ACR0.
+-         *
+-         * The kernel currently installs EVBASE only for ACR0 and reads trap
+-         * metadata from the ACR0 banked SSRs (see arch/linx/kernel/traps.c).
+-         */
+-        dst_acr = 0;
++        /* v0.1: ACR2 + SCT_SYS routes to ACR1; others route to ACR0. */
++        dst_acr = (request_type == LINX_SCT_SYS) ? 1 : 0;
+     } else {
+         cs->exception_index = LINX_EXCP_ILLEGAL_INST;
+         cpu_loop_exit(cs);
+     }
+ 
++    /*
++     * Preserve block/queue state for the trapped ACR so we can resume the
++     * interrupted block after returning via ACRE. Without this, the kernel's
++     * own block headers clobber the user's commit metadata (brtype/tgt/cond)
++     * and hand queues, breaking post-syscall control flow and any mid-block
++     * trap return.
++     */
++    linx_acr_save_block_state(env, src_acr);
++    linx_acr_restore_block_state(env, dst_acr);
++
+     /* Save trap state into the managing ACR bank. */
+     env->ssr_acr[dst_acr][LINX_SSR_ECSTATE] = env->ssr[LINX_SSR_CSTATE];
+     env->ssr_acr[dst_acr][LINX_SSR_EBPC] = bpc;
+@@ -286,7 +361,7 @@ void HELPER(linx_service_request)(CPULinxState *env, uint32_t request_type,
+     env->ssr_acr[dst_acr][LINX_SSR_EBARG] = 0;
+ 
+     /* Trap reporting (minimal bring-up encoding). */
+-    env->ssr_acr[dst_acr][LINX_SSR_TRAPNO] = 16; /* E_SCALL */
++    env->ssr_acr[dst_acr][LINX_SSR_TRAPNO] = linx_trapno_sync(LINX_TRAPNUM_E_SCALL, 0);
+     env->ssr_acr[dst_acr][LINX_SSR_TRAPARG0] = request_type;
+ 
+     /* Disable interrupts and switch to managing ring, then vector to EVBASE. */
+@@ -309,6 +384,21 @@ void HELPER(linx_acr_enter)(CPULinxState *env, uint32_t rra_type)
+     const uint32_t target = linx_cstate_get_acr(ecstate);
+     const uint64_t resume_pc = env->ssr_acr[mgr][LINX_SSR_EBPC];
+ 
++    if (getenv("LINX_TRACE_ACR_ENTER")) {
++        static int count;
++        if (count++ < 64) {
++            fprintf(stderr,
++                    "Linx: ACR_ENTER mgr=%u -> target=%u pc=0x%016" PRIx64
++                    " a0=0x%016" PRIx64 " ecstate=0x%016" PRIx64 "\n",
++                    mgr, target, resume_pc,
++                    env->gpr[LINX_REG_A0], ecstate);
++            fflush(stderr);
++        }
++    }
++
++    linx_acr_save_block_state(env, mgr);
++    linx_acr_restore_block_state(env, target);
++
+     env->acr = target;
+     env->ssr[LINX_SSR_CSTATE] = ecstate;
+     env->pc = resume_pc;
+@@ -1006,14 +1096,449 @@ enum {
+     LINX_IOT_S1R = 1u << 3,
+ };
+ 
++/* ------------------------------------------------------------------------- */
++/* Restartable template blocks                                               */
++/* ------------------------------------------------------------------------- */
++
++static inline int linx_next_fentry_reg(int current)
++{
++    current++;
++    if (current > 23) {
++        current = 2;
++    }
++    return current;
++}
++
++static inline int linx_fentry_reg_count(int begin, int end)
++{
++    if (begin <= end) {
++        return end - begin + 1;
++    }
++    return (23 - begin + 1) + (end - 2 + 1);
++}
++
++static inline void linx_template_clear(CPULinxState *env)
++{
++    env->tmpl_pc = 0;
++    env->tmpl_kind = 0;
++    env->tmpl_step = 0;
++    env->tmpl_reg_cur = 0;
++    env->tmpl_reg_begin = 0;
++    env->tmpl_reg_end = 0;
++    env->tmpl_stacksize = 0;
++    env->tmpl_mem_dst = 0;
++    env->tmpl_mem_src = 0;
++    env->tmpl_mem_remaining = 0;
++    env->tmpl_mem_value = 0;
++}
++
++void HELPER(linx_template_step)(CPULinxState *env, uint32_t kind,
++                                uint64_t cur_pc, uint64_t next_pc,
++                                uint32_t op0, uint32_t op1, uint64_t op2)
++{
++    CPUState *cs = env_cpu(env);
++
++    if (env->tmpl_pc != cur_pc || env->tmpl_kind != kind) {
++        env->tmpl_pc = cur_pc;
++        env->tmpl_kind = kind;
++        env->tmpl_step = 0;
++        env->tmpl_reg_cur = 0;
++        env->tmpl_reg_begin = 0;
++        env->tmpl_reg_end = 0;
++        env->tmpl_stacksize = 0;
++        env->tmpl_mem_dst = 0;
++        env->tmpl_mem_src = 0;
++        env->tmpl_mem_remaining = 0;
++        env->tmpl_mem_value = 0;
++
++        switch (kind) {
++        case LINX_TEMPLATE_FENTRY:
++        case LINX_TEMPLATE_FEXIT:
++        case LINX_TEMPLATE_FRET_RA:
++        case LINX_TEMPLATE_FRET_STK:
++            env->tmpl_reg_begin = op0;
++            env->tmpl_reg_end = op1;
++            env->tmpl_reg_cur = op0;
++            env->tmpl_stacksize = op2;
++            break;
++
++        case LINX_TEMPLATE_MCOPY: {
++            const uint32_t dst_reg = op0;
++            const uint32_t src_reg = op1;
++            const uint32_t size_reg = (uint32_t)op2;
++            if (dst_reg >= LINX_GPR_COUNT || src_reg >= LINX_GPR_COUNT ||
++                size_reg >= LINX_GPR_COUNT) {
++                helper_raise_exception(env, LINX_EXCP_ILLEGAL_INST);
++            }
++            env->tmpl_mem_dst = env->gpr[dst_reg];
++            env->tmpl_mem_src = env->gpr[src_reg];
++            env->tmpl_mem_remaining = env->gpr[size_reg];
++            break;
++        }
++
++        case LINX_TEMPLATE_MSET: {
++            const uint32_t dst_reg = op0;
++            const uint32_t val_reg = op1;
++            const uint32_t size_reg = (uint32_t)op2;
++            if (dst_reg >= LINX_GPR_COUNT || val_reg >= LINX_GPR_COUNT ||
++                size_reg >= LINX_GPR_COUNT) {
++                helper_raise_exception(env, LINX_EXCP_ILLEGAL_INST);
++            }
++            env->tmpl_mem_dst = env->gpr[dst_reg];
++            env->tmpl_mem_value = env->gpr[val_reg] & 0xffu;
++            env->tmpl_mem_remaining = env->gpr[size_reg];
++            break;
++        }
++
++        default:
++            helper_raise_exception(env, LINX_EXCP_ILLEGAL_INST);
++            break;
++        }
++    }
++
++    switch (kind) {
++    case LINX_TEMPLATE_FENTRY: {
++        const uint64_t stacksize = env->tmpl_stacksize;
++        const uint64_t adj = stacksize + linx_callframe_size;
++        const int begin = (int)env->tmpl_reg_begin;
++        const int end = (int)env->tmpl_reg_end;
++        const int count = (stacksize > 0) ? linx_fentry_reg_count(begin, end) : 0;
++        const uint32_t step = env->tmpl_step;
++
++        if (step == 0) {
++            if (adj) {
++                env->gpr[LINX_REG_SP] -= adj;
++            }
++            env->tmpl_step = 1;
++
++            if (stacksize == 0 || count == 0) {
++                linx_template_clear(env);
++                env->pc = next_pc;
++            } else {
++                env->pc = cur_pc;
++            }
++            cpu_loop_exit_noexc(cs);
++        }
++
++        /* step >= 1: save one register per step. */
++        {
++            const int64_t off = (int64_t)stacksize - ((int64_t)step * 8);
++            const int reg = (int)env->tmpl_reg_cur;
++
++            if (off < 0) {
++                linx_template_clear(env);
++                env->pc = next_pc;
++                cpu_loop_exit_noexc(cs);
++            }
++
++            if (reg != LINX_REG_ZERO && reg < LINX_GPR_COUNT) {
++                const uint64_t addr = env->gpr[LINX_REG_SP] + (uint64_t)off;
++                cpu_stq_le_data(env, (abi_ptr)addr, env->gpr[reg]);
++            }
++
++            if (reg == end) {
++                linx_template_clear(env);
++                env->pc = next_pc;
++            } else {
++                env->tmpl_reg_cur = (uint32_t)linx_next_fentry_reg(reg);
++                env->tmpl_step = step + 1;
++                env->pc = cur_pc;
++            }
++            cpu_loop_exit_noexc(cs);
++        }
++        break;
++    }
++
++    case LINX_TEMPLATE_FEXIT:
++    case LINX_TEMPLATE_FRET_RA:
++    case LINX_TEMPLATE_FRET_STK: {
++        const uint64_t stacksize = env->tmpl_stacksize;
++        const uint64_t adj = stacksize + linx_callframe_size;
++        const int begin = (int)env->tmpl_reg_begin;
++        const int end = (int)env->tmpl_reg_end;
++        const int count = (stacksize > 0) ? linx_fentry_reg_count(begin, end) : 0;
++        const uint32_t step = env->tmpl_step;
++
++        if (count && step < (uint32_t)count) {
++            const int reg = (int)env->tmpl_reg_cur;
++            const int64_t off = (int64_t)stacksize - ((int64_t)(step + 1) * 8);
++
++            if (off >= 0 && reg != LINX_REG_ZERO && reg < LINX_GPR_COUNT) {
++                const uint64_t addr = env->gpr[LINX_REG_SP] + (uint64_t)off;
++                env->gpr[reg] = cpu_ldq_le_data(env, (abi_ptr)addr);
++            }
++
++            if (reg != end) {
++                env->tmpl_reg_cur = (uint32_t)linx_next_fentry_reg(reg);
++            }
++            env->tmpl_step = step + 1;
++            env->pc = cur_pc;
++            cpu_loop_exit_noexc(cs);
++        }
++
++        /* After restoring regs: adjust SP and either fall through or return. */
++        if (adj) {
++            env->gpr[LINX_REG_SP] += adj;
++        }
++
++        if (kind == LINX_TEMPLATE_FEXIT) {
++            linx_template_clear(env);
++            env->pc = next_pc;
++            cpu_loop_exit_noexc(cs);
++        }
++
++        {
++            const uint64_t ra = env->gpr[LINX_REG_RA];
++            HELPER(linx_check_bstart_target)(env, ra);
++            linx_template_clear(env);
++            env->pc = ra;
++            cpu_loop_exit_noexc(cs);
++        }
++        break;
++    }
++
++    case LINX_TEMPLATE_MCOPY: {
++        uint64_t dst = env->tmpl_mem_dst;
++        uint64_t src = env->tmpl_mem_src;
++        uint64_t remaining = env->tmpl_mem_remaining;
++
++        if (remaining == 0) {
++            linx_template_clear(env);
++            env->pc = next_pc;
++            cpu_loop_exit_noexc(cs);
++        }
++
++        const uint64_t n = MIN(remaining, 16u);
++        for (uint64_t i = 0; i < n; i++) {
++            uint8_t b = cpu_ldub_data(env, (abi_ptr)src);
++            cpu_stb_data(env, (abi_ptr)dst, b);
++            src++;
++            dst++;
++            remaining--;
++            env->tmpl_mem_src = src;
++            env->tmpl_mem_dst = dst;
++            env->tmpl_mem_remaining = remaining;
++            env->tmpl_step++;
++        }
++
++        if (remaining == 0) {
++            linx_template_clear(env);
++            env->pc = next_pc;
++        } else {
++            env->pc = cur_pc;
++        }
++        cpu_loop_exit_noexc(cs);
++        break;
++    }
++
++    case LINX_TEMPLATE_MSET: {
++        uint64_t dst = env->tmpl_mem_dst;
++        uint64_t remaining = env->tmpl_mem_remaining;
++        const uint8_t v = (uint8_t)env->tmpl_mem_value;
++
++        if (remaining == 0) {
++            linx_template_clear(env);
++            env->pc = next_pc;
++            cpu_loop_exit_noexc(cs);
++        }
++
++        const uint64_t n = MIN(remaining, 16u);
++        for (uint64_t i = 0; i < n; i++) {
++            cpu_stb_data(env, (abi_ptr)dst, v);
++            dst++;
++            remaining--;
++            env->tmpl_mem_dst = dst;
++            env->tmpl_mem_remaining = remaining;
++            env->tmpl_step++;
++        }
++
++        if (remaining == 0) {
++            linx_template_clear(env);
++            env->pc = next_pc;
++        } else {
++            env->pc = cur_pc;
++        }
++        cpu_loop_exit_noexc(cs);
++        break;
++    }
++
++    default:
++        helper_raise_exception(env, LINX_EXCP_ILLEGAL_INST);
++        break;
++    }
++
++    g_assert_not_reached();
++}
++
++enum {
++    LINX_TRAPCAUSE_CAT_IOMMU_PF = 3,
++    LINX_TRAPCAUSE_ACC_LOAD    = 0,
++    LINX_TRAPCAUSE_ACC_STORE   = 1,
++};
++
++static inline bool linx_iova_is_canonical(uint64_t va)
++{
++    const uint64_t top = (va >> 48) & 0xffffu;
++    const uint64_t sign = (va >> 47) & 1u;
++    return top == (sign ? 0xffffu : 0x0000u);
++}
++
++static bool linx_iommu_translate(CPULinxState *env, uint64_t iova,
++                                 bool is_store, hwaddr *pa_out)
++{
++    const uint64_t iotcr = env->ssr_acr[1][LINX_SSR_IOTCR];
++    const bool ime = (iotcr & 1u) != 0;
++
++    if (!ime) {
++        /* Bring-up: identity translation, with the NOMMU physical mask. */
++        *pa_out = (hwaddr)(iova & 0x1fffffffULL);
++        return true;
++    }
++
++    if (!linx_iova_is_canonical(iova)) {
++        return false;
++    }
++
++    /* v0.1 subset: only 48-bit IOVA supported (SZ must be 16). */
++    const uint32_t sz = (uint32_t)((iotcr >> 1) & 0x3fu);
++    if (sz != 16) {
++        return false;
++    }
++
++    const uint64_t iottbr = env->ssr_acr[1][LINX_SSR_IOTTBR];
++    if ((iottbr & 0xfffu) != 0) {
++        return false;
++    }
++
++    hwaddr table = (hwaddr)(iottbr & 0x0000fffffffff000ULL);
++
++    for (int level = 0; level < 4; level++) {
++        const uint32_t shift = 39u - (uint32_t)level * 9u;
++        const uint64_t idx = (iova >> shift) & 0x1ffu;
++        const hwaddr desc_addr = table + (hwaddr)(idx * 8u);
++        MemTxResult result = MEMTX_OK;
++        const uint64_t desc = address_space_ldq_le(&address_space_memory, desc_addr,
++                                                   MEMTXATTRS_UNSPECIFIED, &result);
++        if (result != MEMTX_OK) {
++            return false;
++        }
++
++        const uint32_t type = (uint32_t)(desc & 0x3u);
++        if (type == 0) {
++            return false;
++        }
++
++        if (type == 3) {
++            /* Table descriptor. */
++            if ((desc & 0xffcULL) != 0) {
++                return false;
++            }
++            if ((desc >> 48) != 0) {
++                return false;
++            }
++            table = (hwaddr)(desc & 0x0000fffffffff000ULL);
++            continue;
++        }
++
++        /* Leaf descriptor: Page at L3, Block at L1/L2 (optional). */
++        if (level == 0) {
++            return false;
++        }
++
++        hwaddr block_size = TARGET_PAGE_SIZE;
++        if (type == 2) {
++            if (level == 1) {
++                block_size = (hwaddr)1ull << 30; /* 1 GiB */
++            } else if (level == 2) {
++                block_size = (hwaddr)1ull << 21; /* 2 MiB */
++            } else {
++                return false;
++            }
++        } else if (type == 1) {
++            if (level != 3) {
++                return false;
++            }
++        } else {
++            return false;
++        }
++
++        const hwaddr out_base = (hwaddr)(desc & 0x0000fffffffff000ULL);
++        if ((desc >> 48) != 0) {
++            return false;
++        }
++        if ((out_base & (block_size - 1u)) != 0) {
++            return false;
++        }
++        if ((desc & (3ull << 10)) != 0) {
++            return false;
++        }
++        const uint32_t attridx = (uint32_t)((desc >> 7) & 0x7u);
++        if (attridx > 2u) {
++            return false;
++        }
++        const bool af = ((desc >> 6) & 1u) != 0;
++        if (!af) {
++            return false;
++        }
++
++        const bool w = ((desc >> 3) & 1u) != 0;
++        const bool r = ((desc >> 2) & 1u) != 0;
++
++        if (is_store && !w) {
++            return false;
++        }
++        if (!is_store && !r) {
++            return false;
++        }
++
++        const hwaddr pa = out_base | (hwaddr)(iova & (uint64_t)(block_size - 1u));
++        if (((uint64_t)pa >> 48) != 0) {
++            return false;
++        }
++        *pa_out = pa;
++        return true;
++    }
++
++    return false;
++}
++
+ static inline uint32_t linx_tile_read32(CPULinxState *env, uint64_t addr)
+ {
+-    return cpu_ldl_le_data(env, (abi_ptr)addr);
++    hwaddr pa;
++    if (!linx_iommu_translate(env, addr, false, &pa)) {
++        env->pending_trap_arg0 = addr;
++        env->pending_trap_cause = (uint32_t)((LINX_TRAPCAUSE_CAT_IOMMU_PF << 4) | LINX_TRAPCAUSE_ACC_LOAD);
++        helper_raise_exception(env, LINX_EXCP_LOAD_ACCESS_FAULT);
++    }
++
++    MemTxResult result = MEMTX_OK;
++    const uint32_t v = address_space_ldl_le(&address_space_memory, pa,
++                                           MEMTXATTRS_UNSPECIFIED, &result);
++    if (result != MEMTX_OK) {
++        env->pending_trap_arg0 = addr;
++        env->pending_trap_cause = (uint32_t)((LINX_TRAPCAUSE_CAT_IOMMU_PF << 4) | LINX_TRAPCAUSE_ACC_LOAD);
++        helper_raise_exception(env, LINX_EXCP_LOAD_ACCESS_FAULT);
++    }
++    return v;
+ }
+ 
+ static inline void linx_tile_write32(CPULinxState *env, uint64_t addr, uint32_t v)
+ {
+-    cpu_stl_le_data(env, (abi_ptr)addr, v);
++    hwaddr pa;
++    if (!linx_iommu_translate(env, addr, true, &pa)) {
++        env->pending_trap_arg0 = addr;
++        env->pending_trap_cause = (uint32_t)((LINX_TRAPCAUSE_CAT_IOMMU_PF << 4) | LINX_TRAPCAUSE_ACC_STORE);
++        helper_raise_exception(env, LINX_EXCP_STORE_ACCESS_FAULT);
++    }
++
++    MemTxResult result = MEMTX_OK;
++    address_space_stl_le(&address_space_memory, pa, v,
++                         MEMTXATTRS_UNSPECIFIED, &result);
++    if (result != MEMTX_OK) {
++        env->pending_trap_arg0 = addr;
++        env->pending_trap_cause = (uint32_t)((LINX_TRAPCAUSE_CAT_IOMMU_PF << 4) | LINX_TRAPCAUSE_ACC_STORE);
++        helper_raise_exception(env, LINX_EXCP_STORE_ACCESS_FAULT);
++    }
+ }
+ 
+ static void linx_tile_load(CPULinxState *env, unsigned dst_tile, unsigned addr_reg)
+@@ -1246,10 +1771,14 @@ static bool linx_is_bstart_at_addr(CPULinxState *env, uint64_t pc)
+             return true;
+         }
+ 
+-        /* Template blocks: FENTRY/FEXIT/FRET.* share opcode bits[6:0]=0x41. */
++        /* Template blocks: frame templates (0x41) and memory templates (0x31). */
+         if ((insn & 0x7f) == 0x41 && ((insn >> 12) & 0x7) <= 3) {
+             return true;
+         }
++        if ((insn & 0x7f) == 0x31 && ((insn >> 7) & 0x1f) == 0 &&
++            ((insn >> 12) & 0x7) <= 1) {
++            return true;
++        }
+ 
+         return false;
+     }
+diff --git a/target/linx/helper.h b/target/linx/helper.h
+index e757a0ddfa..fd354fcc2b 100644
+--- a/target/linx/helper.h
++++ b/target/linx/helper.h
+@@ -16,6 +16,7 @@ DEF_HELPER_3(linx_lw_add, i64, env, i64, i32)
+ DEF_HELPER_3(linx_ld_add, i64, env, i64, i64)
+ DEF_HELPER_2(raise_exception, noreturn, env, i32)
+ DEF_HELPER_2(linx_check_bstart_target, void, env, i64)
++DEF_HELPER_7(linx_template_step, noreturn, env, i32, i64, i64, i32, i32, i64)
+ DEF_HELPER_5(linx_watch_store, void, env, i64, i64, i64, i32)
+ DEF_HELPER_5(linx_watch_load, void, env, i64, i64, i64, i32)
+ DEF_HELPER_5(linx_trace_ra, void, env, i64, i32, i64, i64)
+diff --git a/target/linx/insn32.decode b/target/linx/insn32.decode
+index cd6e52456c..94473bf617 100644
+--- a/target/linx/insn32.decode
++++ b/target/linx/insn32.decode
+@@ -40,6 +40,26 @@
+ %succ_imm 20:4
+ %Mode 25:2
+ 
++# Block attribute (B.ATTR) fields
++%BA_C 25:1
++%BA_DR 26:1
++%BA_DataLayout 7:5
++%BA_DataType 20:5
++%BA_PadValue 27:5
++%BA_T 19:1
++%BA_aq 16:1
++%BA_atom 17:1
++%BA_far 18:1
++%BA_rl 15:1
++
++# Block hint (B.HINT) fields
++%HINT_L_UL 16:1
++%HINT_V 15:1
++%HINT_temp 17:2
++%HINT_prefetch_size 20:12
++%HINT_B_E 15:1
++%HINT_reserve_16_16 16:16
++
+ # Tile block fields
+ %TileDataType 27:5
+ %TileFunc 20:5
+@@ -73,6 +93,19 @@ bstart_cube    .... .00. .... 0011 0001 0001 1000 0001 dtype=%TileDataType func=
+ b_iot          .... .... .... .... .10. .... .001 0011 grp=%TileGroup s1r=%S1R s0r=%S0R s1v=%S1V s0v=%S0V dst=%TileDst src1=%TileSrc1 src0=%TileSrc0 reg=%TileRegSrc
+ b_ioti         .... .... .... .... .11. .... .001 0011 grp=%TileGroup s1r=%S1R s0r=%S0R s1v=%S1V s0v=%S0V dst=%TileDst src1=%TileSrc1 src0=%TileSrc0 size=%TileSize
+ 
++# Decoupled-body pointer (decoupled block headers).
++b_text         .... .... .... .... .... .... .000 0011 %simm25
++
++# GPR I/O dependency (decoupled block headers).
++b_ior          .... .00. .... .... .000 .... .001 0011 %RegDst %SrcL %SrcR %SrcD
++
++# Block attributes (ordering/traps); treated as hints/no-ops in bring-up.
++b_attr         .... .... .... .... .000 .... .010 0011 c=%BA_C dr=%BA_DR layout=%BA_DataLayout dtype=%BA_DataType pad=%BA_PadValue t=%BA_T aq=%BA_aq atom=%BA_atom far=%BA_far rl=%BA_rl
++
++# Block hints; treated as no-ops in bring-up.
++b_hint         .... .... .... 0... .000 0000 0011 0011 l_ul=%HINT_L_UL v=%HINT_V prefetch_size=%HINT_prefetch_size temp=%HINT_temp
++b_hint_trace   .... .... .... .... .001 0000 0011 0011 b_e=%HINT_B_E reserve=%HINT_reserve_16_16
++
+ # Block argument registers (LB0/LB1/LB2): LBx = RegSrc + uimm17
+ b_dim          .... .... .... .... .... .... .100 0011 lb=%lb_dst reg=%SrcL uimm=%uimm17_20_12_7_5
+ 
+@@ -134,6 +167,14 @@ fret_ra       .... .... .... .... .010 .... .100 0001 uimm_hi=%fentry_uimm_hi ui
+ # FRET.STK: Function return via stack - restore registers, adjust SP, return
+ fret_stk      .... .... .... .... .011 .... .100 0001 uimm_hi=%fentry_uimm_hi uimm_lo=%fentry_uimm_lo reg_begin=%fentry_begin reg_end=%fentry_end
+ 
++# Bulk memory template blocks (restartable).
++# Encoding per spec:
++#   MCOPY: RegSrc0=DstAddr (bits 19..15), RegSrc1=SrcAddr (24..20), RegSrc2=Size (31..27)
++#   MSET:  RegSrc0=DstAddr (bits 19..15), RegSrc1=Value   (24..20), RegSrc2=Size (31..27)
++# These are standalone template blocks (must not appear inside BSTART..BSTOP).
++mcopy         .... .00. .... .... .000 0000 0011 0001 %SrcL %SrcR %SrcD
++mset          .... .00. .... .... .001 0000 0011 0001 %SrcL %SrcR %SrcD
++
+ # PC-relative address instructions (overlap group - setret is specialized addtpc with RegDst=RA)
+ {
+   setret        .... .... .... .... .... 0101 0000 0111 %imm20
+diff --git a/target/linx/translate.c b/target/linx/translate.c
+index 9b94c9394c..5d2cb3d050 100644
+--- a/target/linx/translate.c
++++ b/target/linx/translate.c
+@@ -27,6 +27,8 @@ typedef struct DisasContext {
+     uint8_t brtype;
+     vaddr brtarget;
+     uint32_t cur_insn_len;
++    bool in_body;
++    bool decoupled_header;
+     bool tgt_modified;
+ } DisasContext;
+ 
+@@ -43,11 +45,15 @@ enum {
+ static TCGv_i64 cpu_gpr[LINX_GPR_COUNT];
+ static TCGv_i64 cpu_tq[4];
+ static TCGv_i64 cpu_uq[4];
++static TCGv_i64 cpu_bpc;
+ static TCGv_i64 cpu_tgt;
+ static TCGv_i32 cpu_cond;
+ static TCGv_i32 cpu_carg;  /* Commit argument flag */
+ static TCGv_i32 cpu_brtype;
+ static TCGv_i32 cpu_blocktype;
++static TCGv_i64 cpu_body_tpc;
++static TCGv_i64 cpu_return_pc;
++static TCGv_i32 cpu_in_body;
+ static TCGv_i32 cpu_tile_func;
+ static TCGv_i32 cpu_tile_dtype;
+ static TCGv_i32 cpu_tile_iot_valid;
+@@ -98,20 +104,13 @@ static uint64_t linx_trace_reg_pc_hi;
+  * while saving/restoring callee-saved registers within the local stacksize
+  * region.
+  */
+-static uint64_t linx_callframe_size;
++uint64_t linx_callframe_size = 64;
+ 
+ static inline bool linx_trace_ra_pc_match(vaddr pc)
+ {
+     return !linx_trace_ra_pc_enabled || (uint64_t)pc == linx_trace_ra_pc;
+ }
+ 
+-static inline bool linx_trace_reg_pc_match(vaddr pc)
+-{
+-    return !linx_trace_reg_pc_filter_enabled ||
+-           ((uint64_t)pc >= linx_trace_reg_pc_lo &&
+-            (uint64_t)pc <= linx_trace_reg_pc_hi);
+-}
+-
+ static inline MemOp linx_mo_endian(void)
+ {
+     return MO_LE;
+@@ -174,6 +173,7 @@ static void linx_set_dest(unsigned dst, TCGv_i64 v)
+ static void linx_block_begin(DisasContext *ctx, uint8_t brtype, vaddr initial_target)
+ {
+     int i;
++    tcg_gen_movi_i64(cpu_bpc, ctx->base.pc_first);
+     for (i = 0; i < 4; i++) {
+         tcg_gen_movi_i64(cpu_tq[i], 0);
+         tcg_gen_movi_i64(cpu_uq[i], 0);
+@@ -182,6 +182,9 @@ static void linx_block_begin(DisasContext *ctx, uint8_t brtype, vaddr initial_ta
+     tcg_gen_movi_i32(cpu_carg, 0);
+     tcg_gen_movi_i32(cpu_brtype, brtype);
+     tcg_gen_movi_i32(cpu_blocktype, 0);
++    tcg_gen_movi_i64(cpu_body_tpc, 0);
++    tcg_gen_movi_i64(cpu_return_pc, 0);
++    tcg_gen_movi_i32(cpu_in_body, 0);
+     tcg_gen_movi_i32(cpu_tile_func, 0);
+     tcg_gen_movi_i32(cpu_tile_dtype, 0);
+     tcg_gen_movi_i32(cpu_tile_iot_valid, 0);
+@@ -196,6 +199,7 @@ static void linx_block_begin(DisasContext *ctx, uint8_t brtype, vaddr initial_ta
+     tcg_gen_movi_i64(cpu_lb[1], 0);
+     tcg_gen_movi_i64(cpu_lb[2], 0);
+     ctx->tgt_modified = false;
++    ctx->decoupled_header = false;
+     
+     /* For COND blocks: set diverted target in bpc (cpu_tgt) */
+     /* For DIRECT/CALL blocks: set target in bpc (cpu_tgt) */
+@@ -266,10 +270,14 @@ static bool linx_is_bstart_at_pc(CPULinxState *env, vaddr pc)
+             return true;
+         }
+ 
+-        /* Template blocks: FENTRY/FEXIT/FRET.* share opcode bits[6:0]=0x41. */
++        /* Template blocks: frame templates (0x41) and memory templates (0x31). */
+         if ((insn & 0x7f) == 0x41 && ((insn >> 12) & 0x7) <= 3) {
+             return true;
+         }
++        if ((insn & 0x7f) == 0x31 && ((insn >> 7) & 0x1f) == 0 &&
++            ((insn >> 12) & 0x7) <= 1) {
++            return true;
++        }
+ 
+         return false;
+     }
+@@ -323,7 +331,42 @@ static void linx_gen_goto_tb(DisasContext *ctx, int slot, vaddr dest)
+ 
+ static void linx_gen_block_end(DisasContext *ctx, vaddr fallthrough)
+ {
+-    /* Commit any tile-block side effects before control-flow commit. */
++    if (ctx->in_body) {
++        /*
++         * Decoupled body terminator: commit tile effects and return to the
++         * header continuation (return_pc).
++         */
++        gen_helper_linx_tile_commit(tcg_env);
++        tcg_gen_movi_i32(cpu_in_body, 0);
++        gen_helper_linx_check_bstart_target(tcg_env, cpu_return_pc);
++        tcg_gen_mov_i64(cpu_pc, cpu_return_pc);
++        tcg_gen_lookup_and_goto_ptr();
++        ctx->base.is_jmp = DISAS_NORETURN;
++        return;
++    }
++
++    if (ctx->decoupled_header) {
++        /*
++         * Decoupled header terminator: jump to the out-of-line body specified
++         * by B.TEXT, then resume at the header continuation (fallthrough).
++         */
++        TCGLabel *have_body = gen_new_label();
++        tcg_gen_brcondi_i64(TCG_COND_NE, cpu_body_tpc, 0, have_body);
++        tcg_gen_movi_i64(cpu_pc, fallthrough);
++        gen_helper_raise_exception(tcg_env,
++                                  tcg_constant_i32(LINX_EXCP_ILLEGAL_INST));
++        tcg_gen_exit_tb(NULL, 0);
++        gen_set_label(have_body);
++
++        tcg_gen_movi_i64(cpu_return_pc, fallthrough);
++        tcg_gen_movi_i32(cpu_in_body, 1);
++        tcg_gen_mov_i64(cpu_pc, cpu_body_tpc);
++        tcg_gen_lookup_and_goto_ptr();
++        ctx->base.is_jmp = DISAS_NORETURN;
++        return;
++    }
++
++    /* Coupled block: commit any tile-block side effects before control-flow commit. */
+     gen_helper_linx_tile_commit(tcg_env);
+ 
+     switch (ctx->brtype & 0x7) {
+@@ -512,6 +555,9 @@ static bool trans_c_bstart_std(DisasContext *ctx, uint8_t brtype)
+     /* pc_next has already been advanced past the current insn, so we need to
+      * check if the CURRENT instruction (pc_next - cur_insn_len) is at pc_first */
+     vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     if (current_pc != ctx->base.pc_first) {
+         /* BSTART in the middle of a translation block - end the previous block */
+         linx_gen_block_end(ctx, current_pc);
+@@ -524,6 +570,9 @@ static bool trans_c_bstart_std(DisasContext *ctx, uint8_t brtype)
+ static bool trans_c_bstart_direct(DisasContext *ctx, arg_c_bstart_direct *a)
+ {
+     vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     if (current_pc != ctx->base.pc_first) {
+         linx_gen_block_end(ctx, current_pc);
+         return true;
+@@ -535,6 +584,9 @@ static bool trans_c_bstart_direct(DisasContext *ctx, arg_c_bstart_direct *a)
+ static bool trans_c_bstart_cond(DisasContext *ctx, arg_c_bstart_cond *a)
+ {
+     vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     if (current_pc != ctx->base.pc_first) {
+         linx_gen_block_end(ctx, current_pc);
+         return true;
+@@ -553,6 +605,9 @@ static bool trans_c_bstop(DisasContext *ctx, arg_c_bstop *a)
+ static bool trans_bstart_call(DisasContext *ctx, arg_bstart_call *a)
+ {
+     vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     if (current_pc != ctx->base.pc_first) {
+         linx_gen_block_end(ctx, current_pc);
+         return true;
+@@ -564,6 +619,9 @@ static bool trans_bstart_call(DisasContext *ctx, arg_bstart_call *a)
+ static bool trans_bstart_direct(DisasContext *ctx, arg_bstart_direct *a)
+ {
+     vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     if (current_pc != ctx->base.pc_first) {
+         linx_gen_block_end(ctx, current_pc);
+         return true;
+@@ -575,6 +633,9 @@ static bool trans_bstart_direct(DisasContext *ctx, arg_bstart_direct *a)
+ static bool trans_bstart_cond(DisasContext *ctx, arg_bstart_cond *a)
+ {
+     vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     if (current_pc != ctx->base.pc_first) {
+         linx_gen_block_end(ctx, current_pc);
+         return true;
+@@ -587,11 +648,16 @@ static bool trans_bstart_vpar(DisasContext *ctx, arg_bstart_vpar *a)
+ {
+     vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
+     (void)a;
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     if (current_pc != ctx->base.pc_first) {
+         linx_gen_block_end(ctx, current_pc);
+         return true;
+     }
+     linx_block_begin(ctx, LINX_BR_FALL, 0);
++    tcg_gen_movi_i32(cpu_blocktype, 4); /* VPAR */
++    ctx->decoupled_header = true;
+     return true;
+ }
+ 
+@@ -599,17 +665,25 @@ static bool trans_bstart_vseq(DisasContext *ctx, arg_bstart_vseq *a)
+ {
+     vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
+     (void)a;
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     if (current_pc != ctx->base.pc_first) {
+         linx_gen_block_end(ctx, current_pc);
+         return true;
+     }
+     linx_block_begin(ctx, LINX_BR_FALL, 0);
++    tcg_gen_movi_i32(cpu_blocktype, 5); /* VSEQ */
++    ctx->decoupled_header = true;
+     return true;
+ }
+ 
+ static bool trans_bstart_tma(DisasContext *ctx, arg_bstart_tma *a)
+ {
+     vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     if (current_pc != ctx->base.pc_first) {
+         linx_gen_block_end(ctx, current_pc);
+         return true;
+@@ -618,12 +692,16 @@ static bool trans_bstart_tma(DisasContext *ctx, arg_bstart_tma *a)
+     tcg_gen_movi_i32(cpu_blocktype, 2); /* TMA */
+     tcg_gen_movi_i32(cpu_tile_func, a->func & 0x1f);
+     tcg_gen_movi_i32(cpu_tile_dtype, a->dtype & 0x1f);
++    ctx->decoupled_header = true;
+     return true;
+ }
+ 
+ static bool trans_bstart_cube(DisasContext *ctx, arg_bstart_cube *a)
+ {
+     vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     if (current_pc != ctx->base.pc_first) {
+         linx_gen_block_end(ctx, current_pc);
+         return true;
+@@ -632,11 +710,15 @@ static bool trans_bstart_cube(DisasContext *ctx, arg_bstart_cube *a)
+     tcg_gen_movi_i32(cpu_blocktype, 6); /* CUBE */
+     tcg_gen_movi_i32(cpu_tile_func, a->func & 0x1f);
+     tcg_gen_movi_i32(cpu_tile_dtype, a->dtype & 0x1f);
++    ctx->decoupled_header = true;
+     return true;
+ }
+ 
+ static bool trans_b_dim(DisasContext *ctx, arg_b_dim *a)
+ {
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     if (ctx->brtype == 0) {
+         return linx_illegal(ctx);
+     }
+@@ -652,6 +734,9 @@ static bool trans_b_dim(DisasContext *ctx, arg_b_dim *a)
+ 
+ static bool trans_b_iot(DisasContext *ctx, arg_b_iot *a)
+ {
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     if (ctx->brtype == 0) {
+         return linx_illegal(ctx);
+     }
+@@ -682,6 +767,9 @@ static bool trans_b_iot(DisasContext *ctx, arg_b_iot *a)
+ 
+ static bool trans_b_ioti(DisasContext *ctx, arg_b_ioti *a)
+ {
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     if (ctx->brtype == 0) {
+         return linx_illegal(ctx);
+     }
+@@ -710,6 +798,70 @@ static bool trans_b_ioti(DisasContext *ctx, arg_b_ioti *a)
+     return true;
+ }
+ 
++static bool trans_b_text(DisasContext *ctx, arg_b_text *a)
++{
++    vaddr pc = ctx->base.pc_next - ctx->cur_insn_len;
++    vaddr body_tpc = linx_pcrel_target(pc, a->simm25);
++
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
++    if (ctx->brtype == 0) {
++        return linx_illegal(ctx);
++    }
++
++    tcg_gen_movi_i64(cpu_body_tpc, body_tpc);
++    return true;
++}
++
++static bool trans_b_ior(DisasContext *ctx, arg_b_ior *a)
++{
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
++    if (ctx->brtype == 0) {
++        return linx_illegal(ctx);
++    }
++    (void)a;
++    return true;
++}
++
++static bool trans_b_attr(DisasContext *ctx, arg_b_attr *a)
++{
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
++    if (ctx->brtype == 0) {
++        return linx_illegal(ctx);
++    }
++    (void)a;
++    return true;
++}
++
++static bool trans_b_hint(DisasContext *ctx, arg_b_hint *a)
++{
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
++    if (ctx->brtype == 0) {
++        return linx_illegal(ctx);
++    }
++    (void)a;
++    return true;
++}
++
++static bool trans_b_hint_trace(DisasContext *ctx, arg_b_hint_trace *a)
++{
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
++    if (ctx->brtype == 0) {
++        return linx_illegal(ctx);
++    }
++    (void)a;
++    return true;
++}
++
+ static bool trans_setret(DisasContext *ctx, arg_setret *a)
+ {
+     vaddr pc = ctx->base.pc_next - ctx->cur_insn_len;
+@@ -720,6 +872,9 @@ static bool trans_setret(DisasContext *ctx, arg_setret *a)
+ 
+ static bool trans_c_setc_tgt(DisasContext *ctx, arg_c_setc_tgt *a)
+ {
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     if (ctx->brtype == 0) {
+         return linx_illegal(ctx);
+     }
+@@ -732,6 +887,9 @@ static bool trans_c_setc_tgt(DisasContext *ctx, arg_c_setc_tgt *a)
+ 
+ static bool trans_setc_tgt(DisasContext *ctx, arg_setc_tgt *a)
+ {
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     if (ctx->brtype == 0) {
+         return linx_illegal(ctx);
+     }
+@@ -2157,150 +2315,28 @@ static bool trans_addtpc(DisasContext *ctx, arg_addtpc *a)
+  *   Actual stack size = (uimm_hi << 10) | (uimm_lo << 3)
+  */
+ 
+-/* Helper to decode the split uimm field into actual byte size */
+-static inline int64_t linx_decode_fentry_uimm(uint32_t uimm_hi, uint32_t uimm_lo)
+-{
+-    /* uimm_hi contains bits [14:10], uimm_lo contains bits [9:3] */
+-    /* Reconstruct: (uimm_hi << 10) | (uimm_lo << 3) */
+-    return ((int64_t)uimm_hi << 10) | ((int64_t)uimm_lo << 3);
+-}
+-
+-/* Helper to get next register in FENTRY range (incrementing with wraparound) */
+-static inline int linx_next_fentry_reg(int current, int end_adjusted)
+-{
+-    current++;
+-    if (current > 23) {
+-        current = 2;  /* Wrap from R23 to R2 */
+-    }
+-    return current;
+-}
+-
+-/* Calculate how many registers to save/restore given [begin, end] range */
+-static inline int linx_fentry_reg_count(int begin, int end)
+-{
+-    if (begin <= end) {
+-        return end - begin + 1;
+-    } else {
+-        /* Wraparound: begin to R23, then R2 to end */
+-        return (23 - begin + 1) + (end - 2 + 1);
+-    }
+-}
+-
+-static void linx_fentry_save_regs(DisasContext *ctx, int begin, int end,
+-                                  int64_t stacksize)
+-{
+-    /* Save registers into the current frame:
+-     *   [sp + stacksize - 8]  = reg_begin
+-     *   [sp + stacksize - 16] = next reg
+-     *   ...
+-     *
+-     * This matches the bring-up toolchain convention and keeps low offsets
+-     * available for locals.
+-     */
+-    if (stacksize <= 0) {
+-        return;
+-    }
+-
+-    const vaddr pc = ctx->base.pc_next - ctx->cur_insn_len;
+-    const int count = linx_fentry_reg_count(begin, end);
+-    int reg = begin;
+-    for (int i = 0; i < count; i++) {
+-        const int64_t off = stacksize - ((int64_t)(i + 1) * 8);
+-        if (off < 0) {
+-            break;
+-        }
+-
+-        if (reg != LINX_REG_ZERO && reg < LINX_GPR_COUNT) {
+-            TCGv_i64 addr64 = tcg_temp_new_i64();
+-            tcg_gen_addi_i64(addr64, cpu_gpr[LINX_REG_SP], off);
+-            if (linx_trace_ra_enabled && reg == LINX_REG_RA &&
+-                linx_trace_ra_pc_match(pc)) {
+-                gen_helper_linx_trace_ra(tcg_env, tcg_constant_i64(pc),
+-                                         tcg_constant_i32(2), addr64,
+-                                         cpu_gpr[LINX_REG_RA]);
+-            }
+-            if (linx_trace_reg_enabled && (uint32_t)reg == linx_trace_reg &&
+-                linx_trace_reg_pc_match(pc)) {
+-                gen_helper_linx_trace_reg(tcg_env, tcg_constant_i64(pc),
+-                                          tcg_constant_i32(2),
+-                                          tcg_constant_i32(reg), addr64,
+-                                          cpu_gpr[reg]);
+-            }
+-            linx_store_from_reg(ctx, linx_addr_from_i64(addr64),
+-                                cpu_gpr[reg], MO_UQ);
+-        }
+-
+-        if (reg == end) {
+-            break;
+-        }
+-        reg = linx_next_fentry_reg(reg, end);
+-    }
+-}
+-
+-static void linx_fentry_restore_regs(DisasContext *ctx, int begin, int end,
+-                                     int64_t stacksize)
+-{
+-    if (stacksize <= 0) {
+-        return;
+-    }
+-
+-    const vaddr pc = ctx->base.pc_next - ctx->cur_insn_len;
+-    const int count = linx_fentry_reg_count(begin, end);
+-    int reg = begin;
+-    for (int i = 0; i < count; i++) {
+-        const int64_t off = stacksize - ((int64_t)(i + 1) * 8);
+-        if (off < 0) {
+-            break;
+-        }
+-
+-        if (reg != LINX_REG_ZERO && reg < LINX_GPR_COUNT) {
+-            TCGv_i64 addr64 = tcg_temp_new_i64();
+-            TCGv_i64 val = tcg_temp_new_i64();
+-            tcg_gen_addi_i64(addr64, cpu_gpr[LINX_REG_SP], off);
+-            tcg_gen_qemu_ld_i64(val, linx_addr_from_i64(addr64), 0,
+-                                MO_UQ | linx_mo_endian());
+-            tcg_gen_mov_i64(cpu_gpr[reg], val);
+-            if (linx_trace_ra_enabled && reg == LINX_REG_RA &&
+-                linx_trace_ra_pc_match(pc)) {
+-                gen_helper_linx_trace_ra(tcg_env, tcg_constant_i64(pc),
+-                                         tcg_constant_i32(3), addr64, val);
+-            }
+-            if (linx_trace_reg_enabled && (uint32_t)reg == linx_trace_reg &&
+-                linx_trace_reg_pc_match(pc)) {
+-                gen_helper_linx_trace_reg(tcg_env, tcg_constant_i64(pc),
+-                                          tcg_constant_i32(3),
+-                                          tcg_constant_i32(reg), addr64, val);
+-            }
+-        }
+-
+-        if (reg == end) {
+-            break;
+-        }
+-        reg = linx_next_fentry_reg(reg, end);
+-    }
+-}
+-
+ /* FENTRY: Function entry - save registers [Begin ~ End], adjust SP */
+ static bool trans_fentry(DisasContext *ctx, arg_fentry *a)
+ {
+     vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
++    const uint64_t stacksize = ((uint64_t)a->uimm_hi << 10) | ((uint64_t)a->uimm_lo << 3);
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     if (current_pc != ctx->base.pc_first) {
+         linx_gen_block_end(ctx, current_pc);
+         return true;
+     }
+ 
+-    /* Standalone frame macro blocks start execution without an explicit BSTART. */
+     linx_block_begin(ctx, LINX_BR_FALL, 0);
+-
+-    int64_t stacksize = linx_decode_fentry_uimm(a->uimm_hi, a->uimm_lo);
+-    int64_t adj = stacksize + (int64_t)linx_callframe_size;
+-    TCGv_i64 sp = cpu_gpr[LINX_REG_SP];
+-    
+-    /* SP = SP - (stacksize + callframe_size) */
+-    if (adj > 0) {
+-        tcg_gen_subi_i64(sp, sp, adj);
+-    }
+-    linx_fentry_save_regs(ctx, a->reg_begin, a->reg_end, stacksize);
++    gen_helper_linx_template_step(tcg_env,
++                                  tcg_constant_i32(0), /* FENTRY */
++                                  tcg_constant_i64(current_pc),
++                                  tcg_constant_i64(ctx->base.pc_next),
++                                  tcg_constant_i32(a->reg_begin),
++                                  tcg_constant_i32(a->reg_end),
++                                  tcg_constant_i64(stacksize));
++    ctx->base.is_jmp = DISAS_NORETURN;
+     return true;
+ }
+ 
+@@ -2308,25 +2344,24 @@ static bool trans_fentry(DisasContext *ctx, arg_fentry *a)
+ static bool trans_fexit(DisasContext *ctx, arg_fexit *a)
+ {
+     vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
++    const uint64_t stacksize = ((uint64_t)a->uimm_hi << 10) | ((uint64_t)a->uimm_lo << 3);
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     if (current_pc != ctx->base.pc_first) {
+         linx_gen_block_end(ctx, current_pc);
+         return true;
+     }
+ 
+     linx_block_begin(ctx, LINX_BR_FALL, 0);
+-
+-    int64_t stacksize = linx_decode_fentry_uimm(a->uimm_hi, a->uimm_lo);
+-    int64_t adj = stacksize + (int64_t)linx_callframe_size;
+-    TCGv_i64 sp = cpu_gpr[LINX_REG_SP];
+-
+-    linx_fentry_restore_regs(ctx, a->reg_begin, a->reg_end, stacksize);
+-    
+-    /* SP = SP + (stacksize + callframe_size) */
+-    if (adj > 0) {
+-        tcg_gen_addi_i64(sp, sp, adj);
+-    }
+-    
+-    /* FEXIT does NOT return directly - it's followed by an IND block with setc.tgt */
++    gen_helper_linx_template_step(tcg_env,
++                                  tcg_constant_i32(1), /* FEXIT */
++                                  tcg_constant_i64(current_pc),
++                                  tcg_constant_i64(ctx->base.pc_next),
++                                  tcg_constant_i32(a->reg_begin),
++                                  tcg_constant_i32(a->reg_end),
++                                  tcg_constant_i64(stacksize));
++    ctx->base.is_jmp = DISAS_NORETURN;
+     return true;
+ }
+ 
+@@ -2334,29 +2369,23 @@ static bool trans_fexit(DisasContext *ctx, arg_fexit *a)
+ static bool trans_fret_ra(DisasContext *ctx, arg_fret_ra *a)
+ {
+     vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
++    const uint64_t stacksize = ((uint64_t)a->uimm_hi << 10) | ((uint64_t)a->uimm_lo << 3);
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     if (current_pc != ctx->base.pc_first) {
+         linx_gen_block_end(ctx, current_pc);
+         return true;
+     }
+ 
+     linx_block_begin(ctx, LINX_BR_FALL, 0);
+-
+-    int64_t stacksize = linx_decode_fentry_uimm(a->uimm_hi, a->uimm_lo);
+-    int64_t adj = stacksize + (int64_t)linx_callframe_size;
+-    TCGv_i64 sp = cpu_gpr[LINX_REG_SP];
+-    TCGv_i64 ra = cpu_gpr[LINX_REG_RA];
+-
+-    linx_fentry_restore_regs(ctx, a->reg_begin, a->reg_end, stacksize);
+-    
+-    /* SP = SP + (stacksize + callframe_size) */
+-    if (adj > 0) {
+-        tcg_gen_addi_i64(sp, sp, adj);
+-    }
+-    
+-    /* Return via RA */
+-    gen_helper_linx_check_bstart_target(tcg_env, ra);
+-    tcg_gen_mov_i64(cpu_pc, ra);
+-    tcg_gen_lookup_and_goto_ptr();
++    gen_helper_linx_template_step(tcg_env,
++                                  tcg_constant_i32(2), /* FRET.RA */
++                                  tcg_constant_i64(current_pc),
++                                  tcg_constant_i64(ctx->base.pc_next),
++                                  tcg_constant_i32(a->reg_begin),
++                                  tcg_constant_i32(a->reg_end),
++                                  tcg_constant_i64(stacksize));
+     ctx->base.is_jmp = DISAS_NORETURN;
+     return true;
+ }
+@@ -2365,29 +2394,71 @@ static bool trans_fret_ra(DisasContext *ctx, arg_fret_ra *a)
+ static bool trans_fret_stk(DisasContext *ctx, arg_fret_stk *a)
+ {
+     vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
++    const uint64_t stacksize = ((uint64_t)a->uimm_hi << 10) | ((uint64_t)a->uimm_lo << 3);
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     if (current_pc != ctx->base.pc_first) {
+         linx_gen_block_end(ctx, current_pc);
+         return true;
+     }
+ 
+     linx_block_begin(ctx, LINX_BR_FALL, 0);
++    gen_helper_linx_template_step(tcg_env,
++                                  tcg_constant_i32(3), /* FRET.STK */
++                                  tcg_constant_i64(current_pc),
++                                  tcg_constant_i64(ctx->base.pc_next),
++                                  tcg_constant_i32(a->reg_begin),
++                                  tcg_constant_i32(a->reg_end),
++                                  tcg_constant_i64(stacksize));
++    ctx->base.is_jmp = DISAS_NORETURN;
++    return true;
++}
++
++/* MCOPY: restartable bulk memory copy template (standalone block). */
++static bool trans_mcopy(DisasContext *ctx, arg_mcopy *a)
++{
++    vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
++    if (current_pc != ctx->base.pc_first) {
++        linx_gen_block_end(ctx, current_pc);
++        return true;
++    }
+ 
+-    int64_t stacksize = linx_decode_fentry_uimm(a->uimm_hi, a->uimm_lo);
+-    int64_t adj = stacksize + (int64_t)linx_callframe_size;
+-    TCGv_i64 sp = cpu_gpr[LINX_REG_SP];
+-    TCGv_i64 ra = cpu_gpr[LINX_REG_RA];
++    linx_block_begin(ctx, LINX_BR_FALL, 0);
++    gen_helper_linx_template_step(tcg_env,
++                                  tcg_constant_i32(LINX_TEMPLATE_MCOPY),
++                                  tcg_constant_i64(current_pc),
++                                  tcg_constant_i64(ctx->base.pc_next),
++                                  tcg_constant_i32(a->SrcL),
++                                  tcg_constant_i32(a->SrcR),
++                                  tcg_constant_i64(a->SrcD));
++    ctx->base.is_jmp = DISAS_NORETURN;
++    return true;
++}
+ 
+-    linx_fentry_restore_regs(ctx, a->reg_begin, a->reg_end, stacksize);
+-    
+-    /* SP = SP + (stacksize + callframe_size) */
+-    if (adj > 0) {
+-        tcg_gen_addi_i64(sp, sp, adj);
++/* MSET: restartable bulk memory set template (standalone block). */
++static bool trans_mset(DisasContext *ctx, arg_mset *a)
++{
++    vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
+     }
+-    
+-    /* Return via RA (which was restored from stack) */
+-    gen_helper_linx_check_bstart_target(tcg_env, ra);
+-    tcg_gen_mov_i64(cpu_pc, ra);
+-    tcg_gen_lookup_and_goto_ptr();
++    if (current_pc != ctx->base.pc_first) {
++        linx_gen_block_end(ctx, current_pc);
++        return true;
++    }
++
++    linx_block_begin(ctx, LINX_BR_FALL, 0);
++    gen_helper_linx_template_step(tcg_env,
++                                  tcg_constant_i32(LINX_TEMPLATE_MSET),
++                                  tcg_constant_i64(current_pc),
++                                  tcg_constant_i64(ctx->base.pc_next),
++                                  tcg_constant_i32(a->SrcL),
++                                  tcg_constant_i32(a->SrcR),
++                                  tcg_constant_i64(a->SrcD));
+     ctx->base.is_jmp = DISAS_NORETURN;
+     return true;
+ }
+@@ -2717,6 +2788,9 @@ static bool trans_cmp_geui(DisasContext *ctx, arg_cmp_geui *a)
+ 
+ static bool trans_b_z(DisasContext *ctx, arg_b_z *a)
+ {
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     /* B.Z: Branch if condition flag is zero */
+     TCGLabel *taken = gen_new_label();
+     TCGLabel *done = gen_new_label();
+@@ -2737,6 +2811,9 @@ static bool trans_b_z(DisasContext *ctx, arg_b_z *a)
+ 
+ static bool trans_b_nz(DisasContext *ctx, arg_b_nz *a)
+ {
++    if (ctx->in_body) {
++        return linx_illegal(ctx);
++    }
+     /* B.NZ: Branch if condition flag is non-zero */
+     TCGLabel *taken = gen_new_label();
+     TCGLabel *done = gen_new_label();
+@@ -3316,6 +3393,8 @@ static void linx_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
+     ctx->brtype = (uint8_t)env->brtype;
+     ctx->brtarget = 0;
+     ctx->cur_insn_len = 0;
++    ctx->in_body = env->in_body != 0;
++    ctx->decoupled_header = false;
+     ctx->tgt_modified = false;
+ }
+ 
+@@ -3515,11 +3594,15 @@ void linx_translate_init(void)
+                                            offsetof(CPULinxState, uq[i]),
+                                            uq_names[i]);
+     }
++    cpu_bpc = tcg_global_mem_new_i64(tcg_env, offsetof(CPULinxState, bpc), "bpc");
+     cpu_tgt = tcg_global_mem_new_i64(tcg_env, offsetof(CPULinxState, tgt), "tgt");
+     cpu_cond = tcg_global_mem_new_i32(tcg_env, offsetof(CPULinxState, cond), "cond");
+     cpu_carg = tcg_global_mem_new_i32(tcg_env, offsetof(CPULinxState, carg), "carg");
+     cpu_brtype = tcg_global_mem_new_i32(tcg_env, offsetof(CPULinxState, brtype), "brtype");
+     cpu_blocktype = tcg_global_mem_new_i32(tcg_env, offsetof(CPULinxState, blocktype), "blocktype");
++    cpu_body_tpc = tcg_global_mem_new_i64(tcg_env, offsetof(CPULinxState, body_tpc), "body_tpc");
++    cpu_return_pc = tcg_global_mem_new_i64(tcg_env, offsetof(CPULinxState, return_pc), "return_pc");
++    cpu_in_body = tcg_global_mem_new_i32(tcg_env, offsetof(CPULinxState, in_body), "in_body");
+     cpu_tile_func = tcg_global_mem_new_i32(tcg_env, offsetof(CPULinxState, tile_func), "tile_func");
+     cpu_tile_dtype = tcg_global_mem_new_i32(tcg_env, offsetof(CPULinxState, tile_dtype), "tile_dtype");
+     cpu_tile_iot_valid = tcg_global_mem_new_i32(tcg_env, offsetof(CPULinxState, tile_iot_valid), "tile_iot_valid");
+diff --git a/scripts/linxisa/run-iommu-tile-basic.sh b/scripts/linxisa/run-iommu-tile-basic.sh
+new file mode 100755
+index 0000000000..207795ba26
+--- /dev/null
++++ b/scripts/linxisa/run-iommu-tile-basic.sh
+@@ -0,0 +1,50 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
++
++LLVM_BUILD="${LLVM_BUILD:-$HOME/llvm-project/build-linxisa-clang}"
++LLC="${LLC:-$LLVM_BUILD/bin/llc}"
++
++QEMU_BUILD="${QEMU_BUILD:-$ROOT/build}"
++QEMU_BIN="${QEMU_BIN:-}"
++
++if [[ -z "$QEMU_BIN" ]]; then
++  for cand in \
++    "$QEMU_BUILD/qemu-system-linx64" \
++    "$ROOT/build/qemu-system-linx64" \
++    "$ROOT/build-tci/qemu-system-linx64" \
++    "$ROOT/build-linx/qemu-system-linx64" \
++    "$QEMU_BUILD/qemu-system-linx64-unsigned" \
++    "$ROOT/build/qemu-system-linx64-unsigned" \
++    "$ROOT/build-tci/qemu-system-linx64-unsigned" \
++    "$ROOT/build-linx/qemu-system-linx64-unsigned"; do
++    if [[ -x "$cand" ]]; then
++      QEMU_BIN="$cand"
++      break
++    fi
++  done
++fi
++
++if [[ ! -x "$LLC" ]]; then
++  echo "error: llc not found/executable: $LLC" >&2
++  echo "       set LLC=... or LLVM_BUILD=... (see docs/linxisa/README.md)" >&2
++  exit 1
++fi
++if [[ -z "$QEMU_BIN" ]]; then
++  echo "error: qemu-system-linx64 not found." >&2
++  echo "       set QEMU_BIN=... or QEMU_BUILD=..., or build QEMU (see docs/linxisa/README.md)" >&2
++  exit 1
++fi
++
++TMP="$(mktemp -d "${TMPDIR:-/tmp}/linxisa-iommu-tile.XXXXXX")"
++trap 'rm -rf "$TMP"' EXIT
++
++OUT_O="$TMP/iommu_tile_basic.o"
++SRC="$ROOT/tests/linxisa/iommu_tile_basic.ll"
++
++echo "[llc] -mtriple=linx64 $SRC"
++"$LLC" -mtriple=linx64 -O2 -filetype=obj "$SRC" -o "$OUT_O"
++
++echo "[run] $QEMU_BIN -kernel $OUT_O"
++"$QEMU_BIN" -nographic -monitor none -machine virt -kernel "$OUT_O"
+diff --git a/scripts/linxisa/run-mcopy-mset-basic.sh b/scripts/linxisa/run-mcopy-mset-basic.sh
+new file mode 100755
+index 0000000000..29d54a3181
+--- /dev/null
++++ b/scripts/linxisa/run-mcopy-mset-basic.sh
+@@ -0,0 +1,51 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
++
++LLVM_BUILD="${LLVM_BUILD:-$HOME/llvm-project/build-linxisa-clang}"
++LLVM_MC="${LLVM_MC:-$LLVM_BUILD/bin/llvm-mc}"
++
++QEMU_BUILD="${QEMU_BUILD:-$ROOT/build}"
++QEMU_BIN="${QEMU_BIN:-}"
++
++if [[ -z "$QEMU_BIN" ]]; then
++  for cand in \
++    "$QEMU_BUILD/qemu-system-linx64" \
++    "$ROOT/build/qemu-system-linx64" \
++    "$ROOT/build-tci/qemu-system-linx64" \
++    "$ROOT/build-linx/qemu-system-linx64" \
++    "$QEMU_BUILD/qemu-system-linx64-unsigned" \
++    "$ROOT/build/qemu-system-linx64-unsigned" \
++    "$ROOT/build-tci/qemu-system-linx64-unsigned" \
++    "$ROOT/build-linx/qemu-system-linx64-unsigned"; do
++    if [[ -x "$cand" ]]; then
++      QEMU_BIN="$cand"
++      break
++    fi
++  done
++fi
++
++if [[ ! -x "$LLVM_MC" ]]; then
++  echo "error: llvm-mc not found/executable: $LLVM_MC" >&2
++  echo "       set LLVM_MC=... or LLVM_BUILD=... (see docs/linxisa/README.md)" >&2
++  exit 1
++fi
++if [[ -z "$QEMU_BIN" ]]; then
++  echo "error: qemu-system-linx64 not found." >&2
++  echo "       set QEMU_BIN=... or QEMU_BUILD=..., or build QEMU (see docs/linxisa/README.md)" >&2
++  exit 1
++fi
++
++TMP="$(mktemp -d "${TMPDIR:-/tmp}/linxisa-mcopy-mset.XXXXXX")"
++trap 'rm -rf "$TMP"' EXIT
++
++OUT_O="$TMP/mcopy_mset_basic.o"
++SRC="$ROOT/tests/linxisa/mcopy_mset_basic.s"
++
++echo "[llvm-mc] -triple=linx64 $SRC"
++"$LLVM_MC" -triple=linx64 -filetype=obj "$SRC" -o "$OUT_O"
++
++echo "[run] $QEMU_BIN -kernel $OUT_O"
++"$QEMU_BIN" -nographic -monitor none -machine virt -kernel "$OUT_O"
++
+diff --git a/scripts/linxisa/run-mmu-ttbr-basic.sh b/scripts/linxisa/run-mmu-ttbr-basic.sh
+new file mode 100755
+index 0000000000..df30b89cef
+--- /dev/null
++++ b/scripts/linxisa/run-mmu-ttbr-basic.sh
+@@ -0,0 +1,51 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
++
++LLVM_BUILD="${LLVM_BUILD:-$HOME/llvm-project/build-linxisa-clang}"
++LLVM_MC="${LLVM_MC:-$LLVM_BUILD/bin/llvm-mc}"
++
++QEMU_BUILD="${QEMU_BUILD:-$ROOT/build}"
++QEMU_BIN="${QEMU_BIN:-}"
++
++if [[ -z "$QEMU_BIN" ]]; then
++  for cand in \
++    "$QEMU_BUILD/qemu-system-linx64" \
++    "$ROOT/build/qemu-system-linx64" \
++    "$ROOT/build-tci/qemu-system-linx64" \
++    "$ROOT/build-linx/qemu-system-linx64" \
++    "$QEMU_BUILD/qemu-system-linx64-unsigned" \
++    "$ROOT/build/qemu-system-linx64-unsigned" \
++    "$ROOT/build-tci/qemu-system-linx64-unsigned" \
++    "$ROOT/build-linx/qemu-system-linx64-unsigned"; do
++    if [[ -x "$cand" ]]; then
++      QEMU_BIN="$cand"
++      break
++    fi
++  done
++fi
++
++if [[ ! -x "$LLVM_MC" ]]; then
++  echo "error: llvm-mc not found/executable: $LLVM_MC" >&2
++  echo "       set LLVM_MC=... or LLVM_BUILD=... (see docs/linxisa/README.md)" >&2
++  exit 1
++fi
++if [[ -z "$QEMU_BIN" ]]; then
++  echo "error: qemu-system-linx64 not found." >&2
++  echo "       set QEMU_BIN=... or QEMU_BUILD=..., or build QEMU (see docs/linxisa/README.md)" >&2
++  exit 1
++fi
++
++TMP="$(mktemp -d "${TMPDIR:-/tmp}/linxisa-mmu-ttbr.XXXXXX")"
++trap 'rm -rf "$TMP"' EXIT
++
++OUT_O="$TMP/mmu_ttbr_basic.o"
++SRC="$ROOT/tests/linxisa/mmu_ttbr_basic.s"
++
++echo "[llvm-mc] -triple=linx64 $SRC"
++"$LLVM_MC" -triple=linx64 -filetype=obj "$SRC" -o "$OUT_O"
++
++echo "[run] $QEMU_BIN -kernel $OUT_O"
++"$QEMU_BIN" -nographic -monitor none -machine virt -kernel "$OUT_O"
++
+diff --git a/scripts/linxisa/run-tile-copy-btext.sh b/scripts/linxisa/run-tile-copy-btext.sh
+new file mode 100755
+index 0000000000..f06e0879ad
+--- /dev/null
++++ b/scripts/linxisa/run-tile-copy-btext.sh
+@@ -0,0 +1,51 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
++
++LLVM_BUILD="${LLVM_BUILD:-$HOME/llvm-project/build-linxisa-clang}"
++LLC="${LLC:-$LLVM_BUILD/bin/llc}"
++
++QEMU_BUILD="${QEMU_BUILD:-$ROOT/build}"
++QEMU_BIN="${QEMU_BIN:-}"
++
++if [[ -z "$QEMU_BIN" ]]; then
++  for cand in \
++    "$QEMU_BUILD/qemu-system-linx64" \
++    "$ROOT/build/qemu-system-linx64" \
++    "$ROOT/build-tci/qemu-system-linx64" \
++    "$ROOT/build-linx/qemu-system-linx64" \
++    "$QEMU_BUILD/qemu-system-linx64-unsigned" \
++    "$ROOT/build/qemu-system-linx64-unsigned" \
++    "$ROOT/build-tci/qemu-system-linx64-unsigned" \
++    "$ROOT/build-linx/qemu-system-linx64-unsigned"; do
++    if [[ -x "$cand" ]]; then
++      QEMU_BIN="$cand"
++      break
++    fi
++  done
++fi
++
++if [[ ! -x "$LLC" ]]; then
++  echo "error: llc not found/executable: $LLC" >&2
++  echo "       set LLC=... or LLVM_BUILD=... (see docs/linxisa/README.md)" >&2
++  exit 1
++fi
++if [[ -z "$QEMU_BIN" ]]; then
++  echo "error: qemu-system-linx64 not found." >&2
++  echo "       set QEMU_BIN=... or QEMU_BUILD=..., or build QEMU (see docs/linxisa/README.md)" >&2
++  exit 1
++fi
++
++TMP="$(mktemp -d "${TMPDIR:-/tmp}/linxisa-tile-copy.XXXXXX")"
++trap 'rm -rf "$TMP"' EXIT
++
++OUT_O="$TMP/tile_copy_btext.o"
++
++SRC="$ROOT/tests/linxisa/tile_copy_btext.ll"
++
++echo "[llc] -mtriple=linx64 $SRC"
++"$LLC" -mtriple=linx64 -O2 -filetype=obj "$SRC" -o "$OUT_O"
++
++echo "[run] $QEMU_BIN -kernel $OUT_O"
++"$QEMU_BIN" -nographic -monitor none -machine virt -kernel "$OUT_O"
+diff --git a/tests/linxisa/iommu_tile_basic.ll b/tests/linxisa/iommu_tile_basic.ll
+new file mode 100644
+index 0000000000..a3f023156a
+--- /dev/null
++++ b/tests/linxisa/iommu_tile_basic.ll
+@@ -0,0 +1,114 @@
++target triple = "linx64"
++
++declare <1024 x i32> @llvm.linx.tma.tload(ptr, i32)
++declare void @llvm.linx.tma.tstore(ptr, <1024 x i32>, i32)
++
++@src_buf = internal global [1024 x i32] zeroinitializer, align 4096
++@dst_buf = internal global [1024 x i32] zeroinitializer, align 4096
++
++@l0_iottbr = internal global [512 x i64] zeroinitializer, align 4096
++@l1_iottbr = internal global [512 x i64] zeroinitializer, align 4096
++@l2_iottbr = internal global [512 x i64] zeroinitializer, align 4096
++@l3_iottbr = internal global [512 x i64] zeroinitializer, align 4096
++
++define void @virt_exit(i32 %code) noreturn {
++entry:
++  %exit_reg = inttoptr i64 268435460 to ptr
++  store volatile i32 %code, ptr %exit_reg, align 4
++  br label %loop
++
++loop:
++  br label %loop
++}
++
++define void @trap_vector() noreturn {
++entry:
++  %exit_reg = inttoptr i64 268435460 to ptr
++  store volatile i32 1, ptr %exit_reg, align 4
++  br label %loop
++
++loop:
++  br label %loop
++}
++
++define void @_start() noreturn {
++entry:
++  ; EVBASE (ACR0) -> trap_vector, so unexpected faults exit.
++  %tv = ptrtoint ptr @trap_vector to i64
++  call void asm sideeffect "ssrset $0, 0x0f01", "r,~{memory}"(i64 %tv)
++
++  ; Build a minimal IOMMU page table:
++  ;   IOVA 0x10000 -> src_buf, IOVA 0x11000 -> dst_buf
++  %l0e0 = getelementptr inbounds [512 x i64], ptr @l0_iottbr, i64 0, i64 0
++  %l1p = ptrtoint ptr @l1_iottbr to i64
++  %l1desc = or i64 %l1p, 3
++  store volatile i64 %l1desc, ptr %l0e0, align 8
++
++  %l1e0 = getelementptr inbounds [512 x i64], ptr @l1_iottbr, i64 0, i64 0
++  %l2p = ptrtoint ptr @l2_iottbr to i64
++  %l2desc = or i64 %l2p, 3
++  store volatile i64 %l2desc, ptr %l1e0, align 8
++
++  %l2e0 = getelementptr inbounds [512 x i64], ptr @l2_iottbr, i64 0, i64 0
++  %l3p = ptrtoint ptr @l3_iottbr to i64
++  %l3desc = or i64 %l3p, 3
++  store volatile i64 %l3desc, ptr %l2e0, align 8
++
++  %l3e16 = getelementptr inbounds [512 x i64], ptr @l3_iottbr, i64 0, i64 16
++  %l3e17 = getelementptr inbounds [512 x i64], ptr @l3_iottbr, i64 0, i64 17
++  %srcp = ptrtoint ptr @src_buf to i64
++  %dstp = ptrtoint ptr @dst_buf to i64
++  %srcdesc = or i64 %srcp, 253
++  %dstdesc = or i64 %dstp, 253
++  store volatile i64 %srcdesc, ptr %l3e16, align 8
++  store volatile i64 %dstdesc, ptr %l3e17, align 8
++
++  ; Enable the tile IOMMU (ACR1 bank).
++  %l0p = ptrtoint ptr @l0_iottbr to i64
++  call void asm sideeffect "hl.ssrset $0, 0x1f14", "r,~{memory}"(i64 %l0p)
++  ; IOTCR: IME=1, SZ=16 (48-bit canonical IOVA).
++  call void asm sideeffect "hl.ssrset $0, 0x1f15", "r,~{memory}"(i64 33)
++
++  br label %init
++
++init:
++  %i = phi i32 [ 0, %entry ], [ %i_next, %init ]
++  %srcp_i = getelementptr inbounds [1024 x i32], ptr @src_buf, i32 0, i32 %i
++  %dstp_i = getelementptr inbounds [1024 x i32], ptr @dst_buf, i32 0, i32 %i
++  %pat = add i32 305397760, %i
++  store i32 %pat, ptr %srcp_i, align 4
++  store i32 0, ptr %dstp_i, align 4
++  %i_next = add i32 %i, 1
++  %i_more = icmp ult i32 %i_next, 1024
++  br i1 %i_more, label %init, label %copy
++
++copy:
++  %src_iova = inttoptr i64 65536 to ptr
++  %dst_iova = inttoptr i64 69632 to ptr
++  %t = call <1024 x i32> @llvm.linx.tma.tload(ptr %src_iova, i32 12)
++  call void @llvm.linx.tma.tstore(ptr %dst_iova, <1024 x i32> %t, i32 12)
++  br label %check
++
++check:
++  %j = phi i32 [ 0, %copy ], [ %j_next, %check_ok ]
++  %srcp_j = getelementptr inbounds [1024 x i32], ptr @src_buf, i32 0, i32 %j
++  %dstp_j = getelementptr inbounds [1024 x i32], ptr @dst_buf, i32 0, i32 %j
++  %sv = load i32, ptr %srcp_j, align 4
++  %dv = load i32, ptr %dstp_j, align 4
++  %eq = icmp eq i32 %sv, %dv
++  br i1 %eq, label %check_ok, label %fail
++
++check_ok:
++  %j_next = add i32 %j, 1
++  %j_more = icmp ult i32 %j_next, 1024
++  br i1 %j_more, label %check, label %pass
++
++fail:
++  call void @virt_exit(i32 1)
++  unreachable
++
++pass:
++  call void @virt_exit(i32 0)
++  unreachable
++}
++
+diff --git a/tests/linxisa/mcopy_mset_basic.s b/tests/linxisa/mcopy_mset_basic.s
+new file mode 100644
+index 0000000000..e61f644893
+--- /dev/null
++++ b/tests/linxisa/mcopy_mset_basic.s
+@@ -0,0 +1,55 @@
++.text
++.globl _start
++_start:
++  # Block 1: initialize registers (coupled block).
++  C.BSTART
++  # src = 0x20000, dst = 0x21000
++  lui 32, ->a0
++  lui 33, ->a1
++  # size = 64 bytes, value = 0x5a
++  addi zero, 64, ->a2
++  addi zero, 90, ->a3
++  C.BSTOP
++
++  # Blocks 2-4: template blocks (standalone). Encode as raw words since the
++  # current Linx asm parser treats '[' as a memory operand.
++  #
++  # MSET  [a0, a3, a2]
++  .long 0x20511031
++  # MSET  [a1, zero, a2]
++  .long 0x20019031
++  # MCOPY [a1, a0, a2]
++  .long 0x20218031
++
++  # Block 5: verify a word and exit (COND block branches to fail on mismatch).
++  C.BSTART COND, .Lfail
++  lwi [a1, 0], ->a4
++  lui 0x5a5a5, ->a5
++  addi a5, 0xa5a, ->a5
++  setc.ne a4, a5
++  addi zero, 0, ->a0
++  C.BSTOP
++
++  # PASS: write 0 to the virt exit MMIO register (0x10000004).
++  C.BSTART
++  hl.lui 268435460, ->t
++  swi a0, [t#1, 0]
++  C.BSTOP
++
++.Lpass_hang:
++  # If QEMU does not terminate immediately on the MMIO exit request, avoid
++  # falling through into the FAIL block below.
++  C.BSTART DIRECT, .Lpass_hang
++  C.BSTOP
++
++.Lfail:
++  # FAIL: write 1 to the virt exit MMIO register.
++  C.BSTART
++  addi zero, 1, ->a0
++  hl.lui 268435460, ->t
++  swi a0, [t#1, 0]
++  C.BSTOP
++
++.Lfail_hang:
++  C.BSTART DIRECT, .Lfail_hang
++  C.BSTOP
+diff --git a/tests/linxisa/mmu_ttbr_basic.s b/tests/linxisa/mmu_ttbr_basic.s
+new file mode 100644
+index 0000000000..9d964c3647
+--- /dev/null
++++ b/tests/linxisa/mmu_ttbr_basic.s
+@@ -0,0 +1,115 @@
++.text
++.globl _start
++_start:
++  # Install a minimal trap vector for ACR0 so unexpected MMU faults exit.
++  C.BSTART
++  addtpc .Ltrap_vector, ->a0
++  addi a0, .Ltrap_vector, ->a0
++  ssrset a0, 0x0f01
++  C.BSTOP
++
++  # Program TTBR0/TTBR1 + enable MME (ACR1 bank) and then jump to a TTBR1-mapped
++  # high-half alias of high_entry. If TTBR1 selection or the page-walk logic is
++  # broken, the program will trap and exit via .Ltrap_vector.
++  C.BSTART IND
++  # TTBR0 = &L0_ttbr0
++  addtpc L0_ttbr0, ->a0
++  addi a0, L0_ttbr0, ->a0
++  hl.ssrset a0, 0x1f10
++  # TTBR1 = &L0_ttbr1
++  addtpc L0_ttbr1, ->a0
++  addi a0, L0_ttbr1, ->a0
++  hl.ssrset a0, 0x1f11
++  # TCR = MME=1, T0SZ=16, T1SZ=16
++  addi zero, 0x821, ->a0
++  hl.ssrset a0, 0x1f12
++
++  # target = HIGH_BASE + phys(high_entry)
++  addtpc .Lhigh_base, ->a1
++  addi a1, .Lhigh_base, ->a1
++  ldi [a1, 0], ->a1
++  addtpc high_entry, ->a2
++  addi a2, high_entry, ->a2
++  add a1, a2, ->a0
++  setc.tgt a0
++  C.BSTOP
++
++high_entry:
++  # PASS: write 0 to the virt exit MMIO register (0x10000004).
++  C.BSTART
++  addi zero, 0, ->a0
++  hl.lui 268435460, ->t
++  swi a0, [t#1, 0]
++  C.BSTOP
++
++.Lpass_hang:
++  C.BSTART DIRECT, .Lpass_hang
++  C.BSTOP
++
++.Ltrap_vector:
++  # FAIL: write 1 to the virt exit MMIO register (0x10000004).
++  C.BSTART
++  addi zero, 1, ->a0
++  hl.lui 268435460, ->t
++  swi a0, [t#1, 0]
++  C.BSTOP
++
++.Ltrap_hang:
++  C.BSTART DIRECT, .Ltrap_hang
++  C.BSTOP
++
++.data
++.p2align 3
++.Lhigh_base:
++  .quad 0xffff800000000000
++
++/*
++ * TTBR0 page tables: map VA[47]=0 region 0..2MiB identity using an L2 block.
++ * This keeps execution working after enabling MME and avoids relying on large
++ * block mappings in early bring-up.
++ */
++.p2align 12
++L0_ttbr0:
++  .quad L1_ttbr0 + 3
++  .zero 8 * (512 - 1)
++
++.p2align 12
++L1_ttbr0:
++  .quad L2_ttbr0 + 3
++  .zero 8 * (512 - 1)
++
++.p2align 12
++L2_ttbr0:
++  # L2[0] block: base=0, AttrIdx=1, AF=1, U/X/W/R=1, type=Block(10)
++  .quad 0xfe
++  # L2[128] block: base=0x10000000 (virt MMIO window), AttrIdx=0 (device), AF=1, U/W/R=1
++  .zero 8 * 127
++  .quad 0x1000006e
++  .zero 8 * (512 - 129)
++
++/*
++ * TTBR1 page tables: map HIGH_BASE + 0x10000 page to PA 0x10000 so we can jump
++ * to a high-half alias of the current code.
++ */
++.p2align 12
++L0_ttbr1:
++  .zero 8 * 256
++  .quad L1_ttbr1 + 3
++  .zero 8 * (512 - 257)
++
++.p2align 12
++L1_ttbr1:
++  .quad L2_ttbr1 + 3
++  .zero 8 * (512 - 1)
++
++.p2align 12
++L2_ttbr1:
++  .quad L3_ttbr1 + 3
++  .zero 8 * (512 - 1)
++
++.p2align 12
++L3_ttbr1:
++  .zero 8 * 16
++  # L3[16] page: base=0x10000, AttrIdx=1, AF=1, U/X/W/R=1, type=Page(01)
++  .quad 0x100fd
++  .zero 8 * (512 - 17)
+diff --git a/tests/linxisa/tile_copy_btext.ll b/tests/linxisa/tile_copy_btext.ll
+new file mode 100644
+index 0000000000..3bda5346f1
+--- /dev/null
++++ b/tests/linxisa/tile_copy_btext.ll
+@@ -0,0 +1,62 @@
++target triple = "linx64"
++
++declare <1024 x i32> @llvm.linx.tma.tload(ptr, i32)
++declare void @llvm.linx.tma.tstore(ptr, <1024 x i32>, i32)
++
++@src_buf = internal global [1024 x i32] zeroinitializer, align 4
++@dst_buf = internal global [1024 x i32] zeroinitializer, align 4
++
++define void @virt_exit(i32 %code) noreturn {
++entry:
++  %exit_reg = inttoptr i64 268435460 to ptr
++  store volatile i32 %code, ptr %exit_reg, align 4
++  br label %loop
++
++loop:
++  br label %loop
++}
++
++define void @_start() noreturn {
++entry:
++  br label %init
++
++init:
++  %i = phi i32 [ 0, %entry ], [ %i_next, %init ]
++  %srcp = getelementptr inbounds [1024 x i32], ptr @src_buf, i32 0, i32 %i
++  %dstp = getelementptr inbounds [1024 x i32], ptr @dst_buf, i32 0, i32 %i
++  %pat = add i32 305397760, %i
++  store i32 %pat, ptr %srcp, align 4
++  store i32 0, ptr %dstp, align 4
++  %i_next = add i32 %i, 1
++  %i_more = icmp ult i32 %i_next, 1024
++  br i1 %i_more, label %init, label %copy
++
++copy:
++  %src0 = getelementptr inbounds [1024 x i32], ptr @src_buf, i32 0, i32 0
++  %dst0 = getelementptr inbounds [1024 x i32], ptr @dst_buf, i32 0, i32 0
++  %t = call <1024 x i32> @llvm.linx.tma.tload(ptr %src0, i32 12)
++  call void @llvm.linx.tma.tstore(ptr %dst0, <1024 x i32> %t, i32 12)
++  br label %check
++
++check:
++  %j = phi i32 [ 0, %copy ], [ %j_next, %check_ok ]
++  %srcj = getelementptr inbounds [1024 x i32], ptr @src_buf, i32 0, i32 %j
++  %dstj = getelementptr inbounds [1024 x i32], ptr @dst_buf, i32 0, i32 %j
++  %sv = load i32, ptr %srcj, align 4
++  %dv = load i32, ptr %dstj, align 4
++  %eq = icmp eq i32 %sv, %dv
++  br i1 %eq, label %check_ok, label %fail
++
++check_ok:
++  %j_next = add i32 %j, 1
++  %j_more = icmp ult i32 %j_next, 1024
++  br i1 %j_more, label %check, label %pass
++
++fail:
++  call void @virt_exit(i32 1)
++  unreachable
++
++pass:
++  call void @virt_exit(i32 0)
++  unreachable
++}

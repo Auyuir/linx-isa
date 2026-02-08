@@ -1,0 +1,28 @@
+[[changelog]]
+== Changelog
+
+This section records notable changes to the LinxISA *v0.1 draft catalog* and to the associated manual/tooling in this
+repository.
+
+[[changelog-v0-1-draft-2026-02-06]]
+=== v0.1 (draft) — 2026-02-06
+
+**ISA catalog / encodings**
+
+* Corrected the `FENCE.D` assembly operand name to `pred_imm` (was `perd_imm` in the draft tables).
+
+**Manual / generated reference**
+
+* Defined `TPC` and `BPC` terminology for PC-relative formulas and exception capture.
+* Expanded Block ISA documentation with block header descriptor guidance (`B.IOR/B.IOT/B.ATTR/B.HINT/...`).
+* Expanded memory chapter with endianness guidance and fence/ordering overview.
+* Improved informative pseudocode in the generated instruction descriptions for:
+  - `B.DIM` (shows `LB0/LB1/LB2` behavior),
+  - `B.*` descriptor families (named operations instead of generic metadata),
+  - execution-control and privileged instructions (`ASSERT`, `EBREAK`, `FENCE.*`, `ACRE/ACRC`).
+* Privileged architecture alignment (from golden sources under `isa/golden/v0.1/`):
+** Rewrote the system/privilege chapter to define the v0.1 ACR model (up to 16 rings in a tree rooted at ACR0),
+   `ACR_ENTER`/`SERVICE_REQUEST` flows, and `ACRC` routing.
+** Updated the curated SSR table (`system_registers_ssr.adoc`) to match the v0.1 draft system-register IDs and to
+   document 12-bit vs 24-bit SSR ID encodings (`SSRGET` vs `HL.SSRGET`) (including `CYCLE = 0x0C00`).
+** Renamed the block commit argument state from CARG to BARG across the manual to match the draft naming.

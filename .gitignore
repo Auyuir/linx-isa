@@ -1,0 +1,55 @@
+# Generated test artifacts
+compiler/llvm/tests/out/
+compiler/llvm/tests/out-linx32/
+compiler/llvm/tests/out-linx64/
+
+# QEMU unit test outputs
+tests/qemu/out/
+
+# Common build outputs (keep binaries out of git)
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+*.elf
+*.bin
+*.tmp
+*.log
+
+# Local debug scratch
+qemu_debug.txt
+qemu_log.txt
+qemu_pid.txt
+qemu_run_out.txt
+qemu_test.log
+qemu_tests_*.bin
+qemu_tests_*.c
+qemu_tests_*.s
+qemu_tests_*.o
+single_block.*
+ultra_minimal.*
+test.o
+
+# Editor / Python
+.DS_Store
+.cursor/
+__pycache__/
+*.pyc
+
+# LinxISA ISA manual build artifacts
+docs/architecture/isa-manual/build/
+docs/architecture/isa-manual/vendor/
+docs/architecture/isa-manual/.bundle/
+
+# ctuning milepost runner outputs
+tools/ctuning/out/
+
+# Workloads harness outputs
+workloads/generated/
+workloads/benchmarks/out/
+workloads/benchmarks/third_party/
+workloads/benchmarks/**/docs/html/
+
+# ctuning scratch (non-source)
+tools/ctuning/out_single/

@@ -1,0 +1,267 @@
+//===-- LinxMCCodeEmitter.cpp - Convert Linx code to machine code --------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file implements the LinxMCCodeEmitter class for variable-length
+// instruction encoding (16/32/48/64-bit).
+//
+//===----------------------------------------------------------------------===//
+
+#include "MCTargetDesc/LinxMCCodeEmitter.h"
+#include "MCTargetDesc/LinxFixupKinds.h"
+#include "MCTargetDesc/LinxMCExpr.h"
+#include "MCTargetDesc/LinxMCTargetDesc.h"
+#include "llvm/ADT/Statistic.h"
+#include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCExpr.h"
+#include "llvm/MC/MCFixup.h"
+#include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCInstrInfo.h"
+#include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/MC/MCSubtargetInfo.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
+#include <cassert>
+#include <cstdint>
+
+using namespace llvm;
+
+#define DEBUG_TYPE "mccodeemitter"
+
+STATISTIC(MCNumEmitted, "Number of MC instructions emitted");
+
+MCCodeEmitter *llvm::createLinxMCCodeEmitter(const MCInstrInfo &MCII,
+                                              MCContext &Ctx) {
+  return new LinxMCCodeEmitter(MCII, Ctx);
+}
+
+void LinxMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
+                                           SmallVectorImpl<MCFixup> &Fixups,
+                                           const MCSubtargetInfo &STI) const {
+  const MCInstrDesc &Desc = MCII.get(MI.getOpcode());
+  unsigned Size = Desc.getSize();
+  
+  // Determine instruction length based on opcode and operands
+  unsigned InstLength = getInstructionLength(MI, STI);
+  
+  // Encode based on length
+  switch (InstLength) {
+  case 2: // 16-bit compressed
+    encode16BitInstruction(MI, OS, Fixups, STI);
+    break;
+  case 4: // 32-bit base
+    encode32BitInstruction(MI, OS, Fixups, STI);
+    break;
+  case 6: // 48-bit extended
+    encode48BitInstruction(MI, OS, Fixups, STI);
+    break;
+  case 8: // 64-bit prefixed
+    encode64BitInstruction(MI, OS, Fixups, STI);
+    break;
+  default:
+    llvm_unreachable("Invalid instruction length");
+  }
+  
+  ++MCNumEmitted;
+}
+
+unsigned LinxMCCodeEmitter::getInstructionLength(const MCInst &MI,
+                                                 const MCSubtargetInfo &STI) const {
+  const MCInstrDesc &Desc = MCII.get(MI.getOpcode());
+  
+  // Check if instruction has explicit size
+  if (Desc.getSize() != 0)
+    return Desc.getSize();
+  
+  // Determine length based on opcode and operands
+  unsigned Opcode = MI.getOpcode();
+  
+  // Compressed instructions (C.*) are 16-bit
+  if (Opcode >= Linx::C_ADD && Opcode <= Linx::C_BSTOP)
+    return 2;
+  
+  // Extended instructions (HL.*) are 48-bit
+  if (Opcode >= Linx::HL_LUI && Opcode <= Linx::HL_ADDI)
+    return 6;
+  
+  // Prefixed instructions (V.*) are 64-bit
+  if (Opcode >= Linx::V_PREFIX_START)
+    return 8;
+  
+  // Default: 32-bit
+  return 4;
+}
+
+void LinxMCCodeEmitter::encode16BitInstruction(const MCInst &MI, raw_ostream &OS,
+                                               SmallVectorImpl<MCFixup> &Fixups,
+                                               const MCSubtargetInfo &STI) const {
+  uint16_t Bits = 0;
+  
+  // Encode opcode
+  Bits |= getMachineOpValue(MI, 0, Fixups, STI) << 0;
+  
+  // Encode operands
+  for (unsigned i = 1, e = MI.getNumOperands(); i < e; ++i) {
+    const MCOperand &Op = MI.getOperand(i);
+    if (Op.isReg()) {
+      Bits |= getRegisterEncoding(Op.getReg()) << getOperandBitOffset(i);
+    } else if (Op.isImm()) {
+      Bits |= encodeImmediate(Op.getImm(), i, Fixups, STI) << getOperandBitOffset(i);
+    } else if (Op.isExpr()) {
+      Bits |= getExprOpValue(Op.getExpr(), Fixups, STI) << getOperandBitOffset(i);
+    }
+  }
+  
+  support::endian::write<uint16_t>(OS, Bits, support::little);
+}
+
+void LinxMCCodeEmitter::encode32BitInstruction(const MCInst &MI, raw_ostream &OS,
+                                               SmallVectorImpl<MCFixup> &Fixups,
+                                               const MCSubtargetInfo &STI) const {
+  uint32_t Bits = 0;
+  
+  // Encode opcode
+  Bits |= getMachineOpValue(MI, 0, Fixups, STI) << 0;
+  
+  // Encode operands
+  for (unsigned i = 1, e = MI.getNumOperands(); i < e; ++i) {
+    const MCOperand &Op = MI.getOperand(i);
+    if (Op.isReg()) {
+      Bits |= getRegisterEncoding(Op.getReg()) << getOperandBitOffset(i);
+    } else if (Op.isImm()) {
+      Bits |= encodeImmediate(Op.getImm(), i, Fixups, STI) << getOperandBitOffset(i);
+    } else if (Op.isExpr()) {
+      Bits |= getExprOpValue(Op.getExpr(), Fixups, STI) << getOperandBitOffset(i);
+    }
+  }
+  
+  support::endian::write<uint32_t>(OS, Bits, support::little);
+}
+
+void LinxMCCodeEmitter::encode48BitInstruction(const MCInst &MI, raw_ostream &OS,
+                                               SmallVectorImpl<MCFixup> &Fixups,
+                                               const MCSubtargetInfo &STI) const {
+  // 48-bit instructions: 32-bit base + 16-bit extension
+  uint32_t BaseBits = 0;
+  uint16_t ExtBits = 0;
+  
+  // Encode base 32 bits
+  BaseBits |= getMachineOpValue(MI, 0, Fixups, STI) << 0;
+  
+  // Encode extension 16 bits (typically immediate)
+  if (MI.getNumOperands() > 1) {
+    const MCOperand &ExtOp = MI.getOperand(MI.getNumOperands() - 1);
+    if (ExtOp.isImm()) {
+      ExtBits = encodeImmediate(ExtOp.getImm(), MI.getNumOperands() - 1, Fixups, STI);
+    } else if (ExtOp.isExpr()) {
+      ExtBits = getExprOpValue(ExtOp.getExpr(), Fixups, STI);
+    }
+  }
+  
+  support::endian::write<uint32_t>(OS, BaseBits, support::little);
+  support::endian::write<uint16_t>(OS, ExtBits, support::little);
+}
+
+void LinxMCCodeEmitter::encode64BitInstruction(const MCInst &MI, raw_ostream &OS,
+                                               SmallVectorImpl<MCFixup> &Fixups,
+                                               const MCSubtargetInfo &STI) const {
+  // 64-bit instructions: prefix (32-bit) + main (32-bit)
+  uint32_t PrefixBits = 0;
+  uint32_t MainBits = 0;
+  
+  // Encode prefix
+  PrefixBits |= getMachineOpValue(MI, 0, Fixups, STI) << 0;
+  
+  // Encode main instruction
+  MainBits |= getMachineOpValue(MI, 1, Fixups, STI) << 0;
+  
+  // Encode operands
+  for (unsigned i = 2, e = MI.getNumOperands(); i < e; ++i) {
+    const MCOperand &Op = MI.getOperand(i);
+    if (Op.isReg()) {
+      // Distribute register encoding across prefix/main
+      if (i < 4)
+        PrefixBits |= getRegisterEncoding(Op.getReg()) << getOperandBitOffset(i);
+      else
+        MainBits |= getRegisterEncoding(Op.getReg()) << getOperandBitOffset(i - 2);
+    } else if (Op.isImm()) {
+      // Large immediates span both parts
+      uint64_t Imm = Op.getImm();
+      PrefixBits |= (Imm & 0xFFFFFFFF) << getOperandBitOffset(i);
+      MainBits |= ((Imm >> 32) & 0xFFFFFFFF) << getOperandBitOffset(i);
+    }
+  }
+  
+  support::endian::write<uint32_t>(OS, PrefixBits, support::little);
+  support::endian::write<uint32_t>(OS, MainBits, support::little);
+}
+
+unsigned LinxMCCodeEmitter::getMachineOpValue(const MCInst &MI, unsigned OpIdx,
+                                             SmallVectorImpl<MCFixup> &Fixups,
+                                             const MCSubtargetInfo &STI) const {
+  const MCOperand &Op = MI.getOperand(OpIdx);
+  if (Op.isReg())
+    return getRegisterEncoding(Op.getReg());
+  if (Op.isImm())
+    return static_cast<unsigned>(Op.getImm());
+  if (Op.isExpr())
+    return getExprOpValue(Op.getExpr(), Fixups, STI);
+  
+  llvm_unreachable("Unhandled operand type");
+}
+
+unsigned LinxMCCodeEmitter::getRegisterEncoding(unsigned Reg) const {
+  // Map LLVM register to LinxISA encoding
+  return Ctx.getRegisterInfo()->getEncodingValue(Reg);
+}
+
+unsigned LinxMCCodeEmitter::encodeImmediate(int64_t Value, unsigned OpIdx,
+                                           SmallVectorImpl<MCFixup> &Fixups,
+                                           const MCSubtargetInfo &STI) const {
+  // Encode immediate based on operand index and instruction context
+  // This is a simplified version - actual implementation needs operand info
+  return static_cast<unsigned>(Value);
+}
+
+unsigned LinxMCCodeEmitter::getExprOpValue(const MCExpr *Expr,
+                                          SmallVectorImpl<MCFixup> &Fixups,
+                                          const MCSubtargetInfo &STI) const {
+  // Handle expressions (labels, symbols, etc.)
+  MCValue Value;
+  if (Expr->evaluateAsRelocatable(Value, nullptr, &Fixups))
+    return static_cast<unsigned>(Value.getConstant());
+  
+  // Create fixup for unresolved expression
+  Fixups.push_back(MCFixup::create(0, Expr, MCFixupKind(Linx::fixup_linx_pcrel_12)));
+  return 0;
+}
+
+unsigned LinxMCCodeEmitter::getOperandBitOffset(unsigned OpIdx) const {
+  // Return bit offset for operand in instruction encoding
+  // This is instruction-specific and should be looked up from instruction info
+  // For 32-bit instructions with typical encoding:
+  //   Bits 0-6: opcode
+  //   Bits 7-11: RegDst
+  //   Bits 12-14: SrcRType (3 bits)
+  //   Bits 15-19: SrcL
+  //   Bits 20-24: SrcR
+  //   Bits 25-26: shamt (for shift instructions)
+  //   Bits 27-31: shamt (5 bits)
+  // For 16-bit compressed instructions:
+  //   Bits 0-6: opcode
+  //   Bits 7-11: RegDst
+  //   Bits 12-14: SrcL
+  //   Bits 15-15: SrcR (3 bits compressed)
+  switch (OpIdx) {
+  case 0: return 0;   // Opcode
+  case 1: return 7;   // First operand (RegDst)
+  case 2: return 15;  // Second operand (SrcL)
+  case 3: return 20;  // Third operand (SrcR)
+  default: return 0;
+  }
+}

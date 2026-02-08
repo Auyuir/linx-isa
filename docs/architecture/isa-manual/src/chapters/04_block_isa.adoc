@@ -1,0 +1,275 @@
+[[blockisa]]
+== Block-structured control flow (Block Split)
+
+[[blockisa-overview]]
+=== Overview
+
+Linx uses an explicit *block split* convention for control flow. Control-flow is defined at **basic-block**
+granularity.
+
+**Safety rule:** every architectural control-flow target (direct, conditional, indirect, call/return) must point at a
+**block start marker**. Branching to an address that does not begin with a block start marker raises an exception.
+
+* `BSTOP` terminates a block.
+* `BSTART.*` / `C.BSTART.*` terminate the current block and begin the next one.
+* A block may also be *implicitly* terminated by the next `BSTART.*` marker in the instruction stream (toolchain
+  convention; some code emits an explicit `BSTOP`/`C.BSTOP` for clarity).
+* Conditional transitions use a two-step sequence:
+  1. set the block condition using `SETC.*` / `C.SETC.*`
+  2. select the next block using `BSTART.* COND, <target>`
+
+[[blockisa-forms]]
+=== Block forms (coupled / decoupled / template)
+
+The v0.1 bring-up profile defines **three block forms**. Toolchains and implementations MUST enforce the legality
+rules in this section.
+
+[[blockisa-forms-coupled]]
+==== Coupled blocks (default scalar CFG)
+
+Coupled blocks are the default form used for scalar control-flow graphs.
+
+Form:
+
+* `BSTART{.<type>}  inst*  (BSTOP | next BSTART)`
+
+Rules:
+
+* A coupled block begins at a block start marker and ends at `BSTOP`/`C.BSTOP` or implicitly at the next block start
+  marker.
+* `B.*` header descriptors MAY appear immediately after the block start marker. In coupled blocks, such descriptors
+  are typically used as tooling metadata and MAY be treated as no-ops by scalar-only implementations unless specified
+  otherwise by the platform profile.
+
+[[blockisa-forms-decoupled]]
+==== Decoupled blocks (header + out-of-line body)
+
+Decoupled blocks split a block into:
+
+* a **header** in the linear instruction stream, and
+* a **body** located out-of-line and referenced by the header.
+
+This form is intended for accelerator/tile execution where the block header packages execution metadata while the
+actual instruction body is placed elsewhere.
+
+*Header form (required structure):*
+
+* A decoupled header begins with `BSTART.<type>`.
+* After `BSTART.<type>`, the header stream MUST contain **only** `B.*` header descriptors (no non-`B.*`
+  instructions).
+* The header MUST provide exactly one `B.TEXT <label>` descriptor which defines `BodyTPC` (the body entrypoint).
+* The header ends at `BSTOP`/`C.BSTOP` or implicitly at the next block start marker in the linear stream.
+
+*Body form (required structure):*
+
+* The body begins at `BodyTPC` (from the header's `B.TEXT`).
+* The body MUST be a **linear** snippet.
+* The body MUST NOT contain:
+** any `BSTART.*` / `C.BSTART.*` / `HL.BSTART.*`,
+** any template block (`FENTRY`/`FEXIT`/`FRET.*`/`MCOPY`/`MSET`),
+** any branch/jump/call/return instruction, or any instruction that performs an architectural control transfer,
+** any `B.*` header descriptor.
+* The body MUST terminate at `BSTOP`/`C.BSTOP`. A body containing only `BSTOP`/`C.BSTOP` is a valid empty body.
+
+*Header→body→return execution:*
+
+* When a decoupled header is executed, the engine MUST execute the body at `BodyTPC` before beginning the next block
+  at the header continuation address.
+* On body termination (`BSTOP`/`C.BSTOP`), execution resumes at the header continuation address:
+** if the header ended with `BSTOP`/`C.BSTOP`: continuation is the instruction address immediately after that stop,
+** if the header ended implicitly: continuation is the address of the next block start marker in the linear stream.
+
+*Safety rule interaction (`B.TEXT`):*
+
+* `BodyTPC` is an **engine-internal entrypoint** and need not begin with a block start marker.
+* Any *architectural* control-flow transfer to `BodyTPC` (direct/cond/ind/call/ret) is illegal and MUST raise an
+  exception, identical to branching to the interior of a coupled block.
+
+[[blockisa-forms-template]]
+==== Template blocks (standalone blocks)
+
+Template blocks are standalone blocks that execute via a *code-template generator* (see <<templates>>). They are not
+wrapped by `BSTART..BSTOP`.
+
+Rules:
+
+* Template blocks MUST NOT appear inside `BSTART..BSTOP` coupled blocks or inside decoupled bodies.
+* Template blocks MAY be targeted by architectural control flow (they are block start markers for the safety rule).
+
+[[blockisa-exec-model]]
+=== Execution model (block boundaries)
+
+The intended execution model is block-granular:
+
+* Instructions within a block may be implemented with out-of-order execution/commit as a microarchitectural choice.
+* Block-to-block behavior is architecturally sequential: the next block begins only after the current block is
+  complete.
+
+This model is the motivation for explicit block delimiters and for block-local temporaries (ClockHands) whose lifetime
+is bounded by the block.
+
+[[blockisa-barg]]
+=== Block Argument Register (BARG)
+
+Blocks carry per-block architectural state called the **Block Argument Register** (**BARG**). BARG is evaluated and
+committed at **block boundaries**.
+
+In the v0.1 draft, BARG includes (non-exhaustive):
+
+* the block type (e.g. `.STD`, `.SYS`, `.FP`, …),
+* the selected branch/exit kind (e.g. `FALL`, `DIRECT`, `COND`, `CALL`, `IND`, `ICALL`, `RET`),
+* the current predicate/condition state, and
+* the selected next target (PC-relative target, or a register-based target for `RET`/`IND`-class exits).
+
+Additional bring-up fields used by tooling and trap recovery include:
+
+* block addresses (`BPC` / `BPCN`),
+* ordering/atomic qualifiers (e.g. `AQ`/`RL` from `B.ATTR`), and
+* output register mapping for split blocks.
+
+**BARG lifetime rules (v0.1 draft):**
+
+* BARG is reset/initialized at block start (a block start marker).
+* `SETC.*` / `C.SETC.*` update BARG and MUST execute *inside a block* (after a block start marker). `SETC` may appear
+  anywhere in the block; it need not be the last instruction.
+* At block commit (`BSTOP` or the next block start marker), the execution engine consults BARG and commits:
+** block-to-block control flow, and
+** any architectural outputs described by the block header (e.g. split-block output mapping).
+* Context switches MUST preserve BARG as part of the LXCPU architectural state.
+
+[[blockisa-block-types]]
+=== Block types and branch types
+
+`BSTART` forms encode two orthogonal concepts:
+
+* a **block type** (e.g. `.STD`, `.SYS`, `.FP`, `.MPAR`, …), and
+* a **branch type** / transition kind (e.g. `FALL`, `DIRECT`, `COND`, `CALL`, `IND`, `ICALL`, `RET`).
+
+The v0.1 draft constrains certain combinations (examples):
+
+* `.SYS` blocks are typically fall-through only (`FALL`), optionally with a fixup label.
+* `.MPAR` / `.MSEQ` blocks are described as fall-through forms used to select memory-parallel vs memory-sequential
+  execution modes.
+* `.FP` blocks mirror `.STD` transitions but mark a floating-point execution context.
+
+Block types beyond the scalar core (e.g. `.TMA`, `.TEPL`, `.VPAR`, `.VSEQ`, `.CUBE`, `.FIXP`) appear in the catalog as
+Block Split forms; this manual treats their detailed execution semantics as outside scope of the v0.1 bring-up unless
+explicitly specified in the golden sources (`isa/golden/v0.1/`).
+
+[[blockisa-tile]]
+=== Tile blocks (TAU)
+
+Linx defines *tile blocks* for hardware-accelerated tile operations. A tile block is a basic block that:
+
+* starts with a tile block header (e.g. `BSTART.TMA`, `BSTART.CUBE`, `BSTART.VPAR`, `BSTART.VSEQ`), and
+* ends at `BSTOP` / `C.BSTOP` or the next block start marker.
+
+Tile blocks operate on **tile registers** (see <<progmodel-tile>>), and use explicit per-block descriptors:
+
+* `B.IOT` / `B.IOTI` describe tile inputs/outputs (including relative tile references and transfer sizing)
+* `B.IOR` describes GPR inputs/outputs for the block
+* `B.DIM` / `C.B.DIM*` may be used to provide block-local dimensions and valid masks via `LB0..LB2`
+
+Bring-up contract (v0.1 profile):
+
+* `BSTART.TMA`, `BSTART.CUBE`, `BSTART.VPAR`, and `BSTART.VSEQ` are treated as **decoupled headers** (see
+  <<blockisa-forms-decoupled>>). Their body is selected by `B.TEXT`.
+
+**Immutability rule (design intent):** a tile block consumes input tiles and produces a new destination tile; it does
+not mutate the input tiles in-place.
+
+NOTE: In the current bring-up model, `B.IOTI Size` is used to convey the tile transfer size (convention: `Size =
+log2(bytes)`, so `Size=12` denotes 4 KiB).
+
+[[blockisa-descriptors]]
+=== Block header descriptors (B.* metadata)
+
+In addition to a block start marker, a block may contain a short sequence of **block header descriptors** (`B.*`)
+that define per-block metadata for accelerated/tile execution and for bring-up tooling.
+
+Bring-up conventions:
+
+* Block header descriptors are placed **immediately after** the block start marker.
+* Block metadata is **reset at block start**; repeated descriptor writes within a block are legal, but tooling should
+  prefer *single assignment* in the header.
+* Scalar-only implementations may treat most descriptors as **hints/no-ops**, but accelerated implementations may
+  consult them for correctness (tile operand binding, ordering, traps).
+
+The v0.1 catalog includes the following descriptor families:
+
+* **Block I/O binding**
+  - `B.IOR`: binds GPR inputs/outputs for a block.
+  - `B.IOT` / `B.IOTI`: binds tile inputs/outputs for a block (including optional input reuse and transfer sizing).
+  - `B.IOD`: binds dependency metadata (e.g. for scheduling between producer/consumer blocks).
+* **Block arguments**
+  - `B.DIM`: writes a block argument register (`LB0`–`LB2`) used for loop bounds, dimensions, and valid masks.
+* **Block attributes and hints**
+  - `B.ATTR`: sets attributes such as trap/atomic/order/layout qualifiers for the current block.
+  - `B.HINT`: sets performance hints (branch likelihood, temperature, prefetch sizing, trace markers).
+* **Text/offset annotations**
+  - `B.TEXT`: in a decoupled block header, selects the out-of-line body entrypoint (`BodyTPC`). In coupled blocks it
+    MAY be used as a tooling annotation.
+
+NOTE: Detailed semantics for tile operand binding and for attribute/hint fields are under active bring-up. This manual
+specifies the *encoded contract* (see <<insnref>>) and provides bring-up guidance; implementations may initially treat
+these as metadata that does not affect scalar execution unless explicitly stated by the platform profile.
+
+[[blockisa-assembly]]
+=== Assembly/disassembly conventions
+
+* The default block type `.STD` is typically omitted:
+  - `BSTART` means `BSTART.STD`
+  - `C.BSTART` means `C.BSTART.STD`
+* For returns, a common convention is:
+  - `C.BSTART RET` then `c.setc.tgt ra`
+
+`SETC.TGT` selects a register or link target used by `RET`/`IND`-class transitions in the common convention above.
+`SETRET`/`C.SETRET` materialize a return address into `ra` for call sequences.
+
+NOTE: The v0.1 draft notes that `C.BSTOP` is encoded as all-zeros in the 16-bit space; it functions both as an
+invalid/reserved encoding and as the block-stop marker in current conventions.
+
+[[blockisa-call-return]]
+=== Calls, returns, and return addresses
+
+In the current toolchain bring-up:
+
+* Calls are represented as a block transition (`BSTART CALL, <target>`).
+* The return address in `ra` is materialized using `addpc/hl.addpc` or `setret/c.setret` patterns.
+* `FRET.STK` is treated as a `ret`-class encoding extension by some tooling (e.g. callgraph analysis).
+
+**Constraint (call header pairing):**
+
+When `SETRET`/`C.SETRET` is used to materialize the return address for a call transition, it must appear **immediately
+after** the call-type block start marker (e.g. `BSTART CALL, <target>` / `C.BSTART CALL`). Tooling and hardware may
+treat the `BSTART`+`SETRET` pair as a fused call header; no other instruction may be placed between them.
+
+[[blockisa-examples]]
+=== Example patterns
+
+The following snippets are representative patterns; exact scheduling and block splitting are toolchain-dependent.
+
+*Conditional block transition:*
+
+[source,asm]
+----
+setc.ne  a0, zero
+BSTART   COND, label
+----
+
+In this pattern, `SETC.*` produces a block-local condition that is consumed by `BSTART COND`. A typical interpretation
+is:
+
+* if the condition is true: branch to `label`
+* otherwise: fall through to the next sequential block in the instruction stream
+
+NOTE: With the safety rule above, `label` must refer to a block start marker (e.g. `BSTART.*` or a template block such
+as `FENTRY`/`FRET.*`). Branching into the interior of another block is invalid and raises an exception.
+
+*Direct call with explicit return address:*
+
+[source,asm]
+----
+BSTART    CALL, callee
+c.setret  return_label, ->ra
+----
