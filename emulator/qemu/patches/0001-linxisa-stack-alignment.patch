@@ -294,8 +294,280 @@ index 62a77df7fe..e5f44f89a9 100644
 +  - QEMU Linx CPU + `virt` machine
 +  - RTL + trace/difftest infra
 +  - Toolchain (relocs + ABI correctness)
+diff --git a/hw/linx/virt.c b/hw/linx/virt.c
+index a08b5299a1..c974c57502 100644
+--- a/hw/linx/virt.c
++++ b/hw/linx/virt.c
+@@ -338,9 +338,37 @@ static void *linx_virt_build_fdt(MachineState *machine,
+ 
+     qemu_fdt_add_subnode(fdt, "/memory@0");
+     qemu_fdt_setprop_string(fdt, "/memory@0", "device_type", "memory");
+-    qemu_fdt_setprop_cells(fdt, "/memory@0", "reg",
+-                           0x0, 0x0,
+-                           (uint32_t)(mem_size >> 32), (uint32_t)mem_size);
++    /*
++     * Keep the DT memory description consistent with the Linx `virt` physical
++     * memory map.
++     *
++     * The `virt` machine places the UART/exit MMIO window at LINX_UART_BASE.
++     * When RAM is large enough to cover that address (e.g. -m 512M), the MMIO
++     * region overlaps the RAM window. Split the DT "reg" ranges to exclude the
++     * MMIO hole so Linux does not allocate normal pages from it.
++     */
++    if (mem_size <= (hwaddr)LINX_UART_BASE) {
++        qemu_fdt_setprop_cells(fdt, "/memory@0", "reg",
++                               0x0, 0x0,
++                               (uint32_t)(mem_size >> 32), (uint32_t)mem_size);
++    } else {
++        const hwaddr mem0_base = 0;
++        const hwaddr mem0_size = (hwaddr)LINX_UART_BASE;
++        const hwaddr mem1_base = (hwaddr)LINX_UART_BASE + (hwaddr)LINX_UART_SIZE;
++        const hwaddr mem1_size = (mem_size > mem1_base) ? (mem_size - mem1_base) : 0;
++
++        if (mem1_size) {
++            qemu_fdt_setprop_cells(fdt, "/memory@0", "reg",
++                                   (uint32_t)(mem0_base >> 32), (uint32_t)mem0_base,
++                                   (uint32_t)(mem0_size >> 32), (uint32_t)mem0_size,
++                                   (uint32_t)(mem1_base >> 32), (uint32_t)mem1_base,
++                                   (uint32_t)(mem1_size >> 32), (uint32_t)mem1_size);
++        } else {
++            qemu_fdt_setprop_cells(fdt, "/memory@0", "reg",
++                                   (uint32_t)(mem0_base >> 32), (uint32_t)mem0_base,
++                                   (uint32_t)(mem0_size >> 32), (uint32_t)mem0_size);
++        }
++    }
+ 
+     qemu_fdt_add_subnode(fdt, "/cpus");
+     qemu_fdt_setprop_cell(fdt, "/cpus", "#address-cells", 0x1);
+diff --git a/scripts/linxisa/run-iommu-tile-basic.sh b/scripts/linxisa/run-iommu-tile-basic.sh
+new file mode 100755
+index 0000000000..207795ba26
+--- /dev/null
++++ b/scripts/linxisa/run-iommu-tile-basic.sh
+@@ -0,0 +1,50 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
++
++LLVM_BUILD="${LLVM_BUILD:-$HOME/llvm-project/build-linxisa-clang}"
++LLC="${LLC:-$LLVM_BUILD/bin/llc}"
++
++QEMU_BUILD="${QEMU_BUILD:-$ROOT/build}"
++QEMU_BIN="${QEMU_BIN:-}"
++
++if [[ -z "$QEMU_BIN" ]]; then
++  for cand in \
++    "$QEMU_BUILD/qemu-system-linx64" \
++    "$ROOT/build/qemu-system-linx64" \
++    "$ROOT/build-tci/qemu-system-linx64" \
++    "$ROOT/build-linx/qemu-system-linx64" \
++    "$QEMU_BUILD/qemu-system-linx64-unsigned" \
++    "$ROOT/build/qemu-system-linx64-unsigned" \
++    "$ROOT/build-tci/qemu-system-linx64-unsigned" \
++    "$ROOT/build-linx/qemu-system-linx64-unsigned"; do
++    if [[ -x "$cand" ]]; then
++      QEMU_BIN="$cand"
++      break
++    fi
++  done
++fi
++
++if [[ ! -x "$LLC" ]]; then
++  echo "error: llc not found/executable: $LLC" >&2
++  echo "       set LLC=... or LLVM_BUILD=... (see docs/linxisa/README.md)" >&2
++  exit 1
++fi
++if [[ -z "$QEMU_BIN" ]]; then
++  echo "error: qemu-system-linx64 not found." >&2
++  echo "       set QEMU_BIN=... or QEMU_BUILD=..., or build QEMU (see docs/linxisa/README.md)" >&2
++  exit 1
++fi
++
++TMP="$(mktemp -d "${TMPDIR:-/tmp}/linxisa-iommu-tile.XXXXXX")"
++trap 'rm -rf "$TMP"' EXIT
++
++OUT_O="$TMP/iommu_tile_basic.o"
++SRC="$ROOT/tests/linxisa/iommu_tile_basic.ll"
++
++echo "[llc] -mtriple=linx64 $SRC"
++"$LLC" -mtriple=linx64 -O2 -filetype=obj "$SRC" -o "$OUT_O"
++
++echo "[run] $QEMU_BIN -kernel $OUT_O"
++"$QEMU_BIN" -nographic -monitor none -machine virt -kernel "$OUT_O"
+diff --git a/scripts/linxisa/run-mcopy-mset-basic.sh b/scripts/linxisa/run-mcopy-mset-basic.sh
+new file mode 100755
+index 0000000000..29d54a3181
+--- /dev/null
++++ b/scripts/linxisa/run-mcopy-mset-basic.sh
+@@ -0,0 +1,51 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
++
++LLVM_BUILD="${LLVM_BUILD:-$HOME/llvm-project/build-linxisa-clang}"
++LLVM_MC="${LLVM_MC:-$LLVM_BUILD/bin/llvm-mc}"
++
++QEMU_BUILD="${QEMU_BUILD:-$ROOT/build}"
++QEMU_BIN="${QEMU_BIN:-}"
++
++if [[ -z "$QEMU_BIN" ]]; then
++  for cand in \
++    "$QEMU_BUILD/qemu-system-linx64" \
++    "$ROOT/build/qemu-system-linx64" \
++    "$ROOT/build-tci/qemu-system-linx64" \
++    "$ROOT/build-linx/qemu-system-linx64" \
++    "$QEMU_BUILD/qemu-system-linx64-unsigned" \
++    "$ROOT/build/qemu-system-linx64-unsigned" \
++    "$ROOT/build-tci/qemu-system-linx64-unsigned" \
++    "$ROOT/build-linx/qemu-system-linx64-unsigned"; do
++    if [[ -x "$cand" ]]; then
++      QEMU_BIN="$cand"
++      break
++    fi
++  done
++fi
++
++if [[ ! -x "$LLVM_MC" ]]; then
++  echo "error: llvm-mc not found/executable: $LLVM_MC" >&2
++  echo "       set LLVM_MC=... or LLVM_BUILD=... (see docs/linxisa/README.md)" >&2
++  exit 1
++fi
++if [[ -z "$QEMU_BIN" ]]; then
++  echo "error: qemu-system-linx64 not found." >&2
++  echo "       set QEMU_BIN=... or QEMU_BUILD=..., or build QEMU (see docs/linxisa/README.md)" >&2
++  exit 1
++fi
++
++TMP="$(mktemp -d "${TMPDIR:-/tmp}/linxisa-mcopy-mset.XXXXXX")"
++trap 'rm -rf "$TMP"' EXIT
++
++OUT_O="$TMP/mcopy_mset_basic.o"
++SRC="$ROOT/tests/linxisa/mcopy_mset_basic.s"
++
++echo "[llvm-mc] -triple=linx64 $SRC"
++"$LLVM_MC" -triple=linx64 -filetype=obj "$SRC" -o "$OUT_O"
++
++echo "[run] $QEMU_BIN -kernel $OUT_O"
++"$QEMU_BIN" -nographic -monitor none -machine virt -kernel "$OUT_O"
++
+diff --git a/scripts/linxisa/run-mmu-ttbr-basic.sh b/scripts/linxisa/run-mmu-ttbr-basic.sh
+new file mode 100755
+index 0000000000..df30b89cef
+--- /dev/null
++++ b/scripts/linxisa/run-mmu-ttbr-basic.sh
+@@ -0,0 +1,51 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
++
++LLVM_BUILD="${LLVM_BUILD:-$HOME/llvm-project/build-linxisa-clang}"
++LLVM_MC="${LLVM_MC:-$LLVM_BUILD/bin/llvm-mc}"
++
++QEMU_BUILD="${QEMU_BUILD:-$ROOT/build}"
++QEMU_BIN="${QEMU_BIN:-}"
++
++if [[ -z "$QEMU_BIN" ]]; then
++  for cand in \
++    "$QEMU_BUILD/qemu-system-linx64" \
++    "$ROOT/build/qemu-system-linx64" \
++    "$ROOT/build-tci/qemu-system-linx64" \
++    "$ROOT/build-linx/qemu-system-linx64" \
++    "$QEMU_BUILD/qemu-system-linx64-unsigned" \
++    "$ROOT/build/qemu-system-linx64-unsigned" \
++    "$ROOT/build-tci/qemu-system-linx64-unsigned" \
++    "$ROOT/build-linx/qemu-system-linx64-unsigned"; do
++    if [[ -x "$cand" ]]; then
++      QEMU_BIN="$cand"
++      break
++    fi
++  done
++fi
++
++if [[ ! -x "$LLVM_MC" ]]; then
++  echo "error: llvm-mc not found/executable: $LLVM_MC" >&2
++  echo "       set LLVM_MC=... or LLVM_BUILD=... (see docs/linxisa/README.md)" >&2
++  exit 1
++fi
++if [[ -z "$QEMU_BIN" ]]; then
++  echo "error: qemu-system-linx64 not found." >&2
++  echo "       set QEMU_BIN=... or QEMU_BUILD=..., or build QEMU (see docs/linxisa/README.md)" >&2
++  exit 1
++fi
++
++TMP="$(mktemp -d "${TMPDIR:-/tmp}/linxisa-mmu-ttbr.XXXXXX")"
++trap 'rm -rf "$TMP"' EXIT
++
++OUT_O="$TMP/mmu_ttbr_basic.o"
++SRC="$ROOT/tests/linxisa/mmu_ttbr_basic.s"
++
++echo "[llvm-mc] -triple=linx64 $SRC"
++"$LLVM_MC" -triple=linx64 -filetype=obj "$SRC" -o "$OUT_O"
++
++echo "[run] $QEMU_BIN -kernel $OUT_O"
++"$QEMU_BIN" -nographic -monitor none -machine virt -kernel "$OUT_O"
++
+diff --git a/scripts/linxisa/run-tile-copy-btext.sh b/scripts/linxisa/run-tile-copy-btext.sh
+new file mode 100755
+index 0000000000..f06e0879ad
+--- /dev/null
++++ b/scripts/linxisa/run-tile-copy-btext.sh
+@@ -0,0 +1,51 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
++
++LLVM_BUILD="${LLVM_BUILD:-$HOME/llvm-project/build-linxisa-clang}"
++LLC="${LLC:-$LLVM_BUILD/bin/llc}"
++
++QEMU_BUILD="${QEMU_BUILD:-$ROOT/build}"
++QEMU_BIN="${QEMU_BIN:-}"
++
++if [[ -z "$QEMU_BIN" ]]; then
++  for cand in \
++    "$QEMU_BUILD/qemu-system-linx64" \
++    "$ROOT/build/qemu-system-linx64" \
++    "$ROOT/build-tci/qemu-system-linx64" \
++    "$ROOT/build-linx/qemu-system-linx64" \
++    "$QEMU_BUILD/qemu-system-linx64-unsigned" \
++    "$ROOT/build/qemu-system-linx64-unsigned" \
++    "$ROOT/build-tci/qemu-system-linx64-unsigned" \
++    "$ROOT/build-linx/qemu-system-linx64-unsigned"; do
++    if [[ -x "$cand" ]]; then
++      QEMU_BIN="$cand"
++      break
++    fi
++  done
++fi
++
++if [[ ! -x "$LLC" ]]; then
++  echo "error: llc not found/executable: $LLC" >&2
++  echo "       set LLC=... or LLVM_BUILD=... (see docs/linxisa/README.md)" >&2
++  exit 1
++fi
++if [[ -z "$QEMU_BIN" ]]; then
++  echo "error: qemu-system-linx64 not found." >&2
++  echo "       set QEMU_BIN=... or QEMU_BUILD=..., or build QEMU (see docs/linxisa/README.md)" >&2
++  exit 1
++fi
++
++TMP="$(mktemp -d "${TMPDIR:-/tmp}/linxisa-tile-copy.XXXXXX")"
++trap 'rm -rf "$TMP"' EXIT
++
++OUT_O="$TMP/tile_copy_btext.o"
++
++SRC="$ROOT/tests/linxisa/tile_copy_btext.ll"
++
++echo "[llc] -mtriple=linx64 $SRC"
++"$LLC" -mtriple=linx64 -O2 -filetype=obj "$SRC" -o "$OUT_O"
++
++echo "[run] $QEMU_BIN -kernel $OUT_O"
++"$QEMU_BIN" -nographic -monitor none -machine virt -kernel "$OUT_O"
 diff --git a/target/linx/cpu.c b/target/linx/cpu.c
-index cc6da8bc34..ccf4ecf166 100644
+index cc6da8bc34..2ed68090c0 100644
 --- a/target/linx/cpu.c
 +++ b/target/linx/cpu.c
 @@ -10,15 +10,32 @@
@@ -347,7 +619,7 @@ index cc6da8bc34..ccf4ecf166 100644
  };
  
  /* Common (non-banked) SSR indices. */
-@@ -43,11 +69,49 @@ enum {
+@@ -43,11 +69,54 @@ enum {
  #define LINX_CSTATE_ACR_MASK 0xFULL
  #define LINX_CSTATE_I_BIT    (1ULL << 4)
  
@@ -357,7 +629,12 @@ index cc6da8bc34..ccf4ecf166 100644
 +#define LINX_TRAPNO_TRAPNUM_MASK   0xffu
 +
 +enum {
++    /* Synchronous exception classes (bring-up profile). */
++    LINX_TRAPNUM_E_INST  = 1,
 +    LINX_TRAPNUM_E_DATA  = 2,
++    LINX_TRAPNUM_E_BLOCK = 3,
++
++    /* Software call / service request. */
 +    LINX_TRAPNUM_E_SCALL = 16,
 +};
 +
@@ -397,7 +674,7 @@ index cc6da8bc34..ccf4ecf166 100644
  static inline uint64_t linx_cstate_set_acr(uint64_t cstate, uint32_t acr)
  {
      return (cstate & ~LINX_CSTATE_ACR_MASK) | ((uint64_t)acr & LINX_CSTATE_ACR_MASK);
-@@ -77,7 +141,12 @@ static inline void linx_irq_kick_if_allowed(CPUState *cs, CPULinxState *env,
+@@ -77,7 +146,12 @@ static inline void linx_irq_kick_if_allowed(CPUState *cs, CPULinxState *env,
      if (env->ssr_acr[dst_acr][LINX_SSR_IPENDING] == 0) {
          return;
      }
@@ -411,7 +688,7 @@ index cc6da8bc34..ccf4ecf166 100644
  }
  
  static void linx_timer_cb(void *opaque)
-@@ -87,14 +156,40 @@ static void linx_timer_cb(void *opaque)
+@@ -87,14 +161,40 @@ static void linx_timer_cb(void *opaque)
      CPULinxState *env = &cpu->env;
  
      /* Set pending bit and raise a hard interrupt. */
@@ -456,7 +733,7 @@ index cc6da8bc34..ccf4ecf166 100644
  }
  
  static void linx_cpu_do_interrupt(CPUState *cs);
-@@ -111,10 +206,16 @@ static vaddr linx_cpu_get_pc(CPUState *cs)
+@@ -111,10 +211,16 @@ static vaddr linx_cpu_get_pc(CPUState *cs)
      return cpu->env.pc;
  }
  
@@ -474,7 +751,7 @@ index cc6da8bc34..ccf4ecf166 100644
  }
  
  static void linx_cpu_synchronize_from_tb(CPUState *cs,
-@@ -151,7 +252,7 @@ static bool linx_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
+@@ -151,7 +257,7 @@ static bool linx_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
      if (interrupt_request & CPU_INTERRUPT_HARD) {
          /* Route all external interrupts to EXCP_INTERRUPT for now. */
          cs->exception_index = EXCP_INTERRUPT;
@@ -483,43 +760,85 @@ index cc6da8bc34..ccf4ecf166 100644
              /* Leave the interrupt request pending until it becomes allowed. */
              cs->exception_index = -1;
              return false;
-@@ -210,40 +311,76 @@ static void linx_cpu_do_interrupt(CPUState *cs)
+@@ -162,6 +268,42 @@ static bool linx_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
+     return false;
+ }
+ 
++static void linx_deliver_sync_trap(CPUState *cs, CPULinxState *env,
++                                   uint64_t tpc, uint8_t trapnum)
++{
++    /*
++     * Deliver a synchronous exception via the bring-up trap SSRs and EVBASE.
++     *
++     * Note: this is a simplified model that routes all synchronous exceptions
++     * (except those from ACR0) to ACR1, matching the Linx v0.1 draft defaults.
++     */
++    const uint32_t src_acr = env->acr & 0xFu;
++    const uint32_t dst_acr = (src_acr == 0) ? 0 : 1;
++
++    linx_acr_save_block_state(env, src_acr);
++    linx_acr_restore_block_state(env, dst_acr);
++
++    const uint64_t evbase = env->ssr_acr[dst_acr][LINX_SSR_EVBASE];
++
++    env->ssr_acr[dst_acr][LINX_SSR_ECSTATE] = env->ssr[LINX_SSR_CSTATE];
++    env->ssr_acr[dst_acr][LINX_SSR_EBPC] = env->bpc;
++    env->ssr_acr[dst_acr][LINX_SSR_ETPC] = tpc;
++    env->ssr_acr[dst_acr][LINX_SSR_EBPCN] = env->bpc;
++    env->ssr_acr[dst_acr][LINX_SSR_TRAPNO] =
++        linx_trapno_sync(trapnum, (uint8_t)env->pending_trap_cause);
++    env->ssr_acr[dst_acr][LINX_SSR_TRAPARG0] = env->pending_trap_arg0;
++
++    env->pending_trap_arg0 = 0;
++    env->pending_trap_cause = 0;
++
++    env->ssr[LINX_SSR_CSTATE] &= ~LINX_CSTATE_I_BIT;
++    env->acr = dst_acr;
++    env->ssr[LINX_SSR_CSTATE] =
++        linx_cstate_set_acr(env->ssr[LINX_SSR_CSTATE], dst_acr);
++    env->pc = evbase ? evbase : tpc;
++    cs->exception_index = -1;
++}
++
+ static void linx_cpu_do_interrupt(CPUState *cs)
+ {
+     CPULinxState *env = cpu_env(cs);
+@@ -195,55 +337,76 @@ static void linx_cpu_do_interrupt(CPUState *cs)
+         qemu_log_mask(LOG_GUEST_ERROR,
+                       "Linx: branch target violation at PC=0x%" PRIx64 "\n",
+                       last_pc);
+-        cs->exception_index = -1;
+-        cpu_abort(cs, "Linx: Bad branch target");
++        linx_deliver_sync_trap(cs, env, last_pc, LINX_TRAPNUM_E_BLOCK);
+         return;
+ 
+     case LINX_EXCP_ILLEGAL_INST:
+         qemu_log_mask(LOG_GUEST_ERROR,
+                       "Linx: illegal instruction at PC=0x%" PRIx64 "\n",
+                       last_pc);
+-        cs->exception_index = -1;
+-        cpu_abort(cs, "Linx: Illegal instruction");
++        linx_deliver_sync_trap(cs, env, last_pc, LINX_TRAPNUM_E_INST);
++        return;
++
++    case LINX_EXCP_BLOCK_FAULT:
++        qemu_log_mask(LOG_GUEST_ERROR,
++                      "Linx: block-format fault at PC=0x%" PRIx64 "\n",
++                      last_pc);
++        linx_deliver_sync_trap(cs, env, last_pc, LINX_TRAPNUM_E_BLOCK);
+         return;
+ 
      case LINX_EXCP_INST_ACCESS_FAULT:
      case LINX_EXCP_LOAD_ACCESS_FAULT:
      case LINX_EXCP_STORE_ACCESS_FAULT:
 -        qemu_log_mask(LOG_GUEST_ERROR,
 -                      "Linx: memory access fault at PC=0x%" PRIx64 "\n",
 -                      last_pc);
-+    {
-+        /*
-+         * MMU/IOMMU faults are delivered as a synchronous E_DATA trap.
-+         * pending_trap_arg0/cause is populated by the MMU/IOMMU code.
-+         */
-+        const uint32_t src_acr = env->acr & 0xFu;
-+        const uint32_t dst_acr = (src_acr == 0) ? 0 : 1;
-+
-+        linx_acr_save_block_state(env, src_acr);
-+        linx_acr_restore_block_state(env, dst_acr);
-+
-+        const uint64_t evbase = env->ssr_acr[dst_acr][LINX_SSR_EVBASE];
-+
-+        env->ssr_acr[dst_acr][LINX_SSR_ECSTATE] = env->ssr[LINX_SSR_CSTATE];
-+        env->ssr_acr[dst_acr][LINX_SSR_EBPC] = env->bpc;
-+        env->ssr_acr[dst_acr][LINX_SSR_ETPC] = last_pc;
-+        env->ssr_acr[dst_acr][LINX_SSR_EBPCN] = env->bpc;
-+        env->ssr_acr[dst_acr][LINX_SSR_TRAPNO] =
-+            linx_trapno_sync(LINX_TRAPNUM_E_DATA, (uint8_t)env->pending_trap_cause);
-+        env->ssr_acr[dst_acr][LINX_SSR_TRAPARG0] = env->pending_trap_arg0;
-+
-+        env->pending_trap_arg0 = 0;
-+        env->pending_trap_cause = 0;
-+
-+        env->ssr[LINX_SSR_CSTATE] &= ~LINX_CSTATE_I_BIT;
-+        env->acr = dst_acr;
-+        env->ssr[LINX_SSR_CSTATE] = linx_cstate_set_acr(env->ssr[LINX_SSR_CSTATE], dst_acr);
-+        env->pc = evbase ? evbase : last_pc;
-         cs->exception_index = -1;
+-        cs->exception_index = -1;
 -        cpu_abort(cs, "Linx: Memory access fault");
++    {
++        /* MMU/IOMMU faults are delivered as a synchronous E_DATA trap. */
++        linx_deliver_sync_trap(cs, env, last_pc, LINX_TRAPNUM_E_DATA);
          return;
 +    }
  
@@ -559,9 +878,15 @@ index cc6da8bc34..ccf4ecf166 100644
 +
 +        /* Save trap source state into managing ACR bank. */
 +        env->ssr_acr[dst_acr][LINX_SSR_ECSTATE] = env->ssr[LINX_SSR_CSTATE];
-+        env->ssr_acr[dst_acr][LINX_SSR_EBPC] = env->bpc;
++        /*
++         * QEMU delivers external interrupts between translated Linx blocks
++         * (TB boundaries). At this point env->pc already points at the next
++         * block start marker, so model the interrupt as occurring "at" that
++         * boundary and resume there on ACRE.
++         */
++        env->ssr_acr[dst_acr][LINX_SSR_EBPC] = last_pc;
 +        env->ssr_acr[dst_acr][LINX_SSR_ETPC] = last_pc;
-+        env->ssr_acr[dst_acr][LINX_SSR_EBPCN] = env->bpc;
++        env->ssr_acr[dst_acr][LINX_SSR_EBPCN] = last_pc;
 +        env->ssr_acr[dst_acr][LINX_SSR_TRAPNO] = 0; /* profile-defined */
 +        env->ssr_acr[dst_acr][LINX_SSR_TRAPARG0] = LINX_IRQ_TIMER0;
 +
@@ -578,7 +903,7 @@ index cc6da8bc34..ccf4ecf166 100644
  
      default:
          /* Check if it's a generic QEMU exception that we should handle */
-@@ -280,21 +417,307 @@ static vaddr linx_pointer_wrap(CPUState *cs, int mmu_idx, vaddr result, vaddr ba
+@@ -280,21 +443,307 @@ static vaddr linx_pointer_wrap(CPUState *cs, int mmu_idx, vaddr result, vaddr ba
  
  static int linx_cpu_mmu_index(CPUState *cs, bool ifunc)
  {
@@ -895,7 +1220,7 @@ index cc6da8bc34..ccf4ecf166 100644
  }
  
  static void linx_cpu_dump_state(CPUState *cs, FILE *f, int flags)
-@@ -412,8 +835,8 @@ static const TCGCPUOps linx_tcg_ops = {
+@@ -412,8 +861,8 @@ static const TCGCPUOps linx_tcg_ops = {
  
  static const VMStateDescription vmstate_linx_cpu = {
      .name = "linx_cpu",
@@ -906,7 +1231,7 @@ index cc6da8bc34..ccf4ecf166 100644
      .fields = (const VMStateField[]) {
          VMSTATE_UINT64(env.pc, LinxCPU),
          VMSTATE_UINT32(env.cond, LinxCPU),
-@@ -421,6 +844,20 @@ static const VMStateDescription vmstate_linx_cpu = {
+@@ -421,6 +870,20 @@ static const VMStateDescription vmstate_linx_cpu = {
          VMSTATE_UINT32(env.carg, LinxCPU),
          VMSTATE_UINT32(env.brtype, LinxCPU),
          VMSTATE_UINT32(env.blocktype, LinxCPU),
@@ -928,10 +1253,31 @@ index cc6da8bc34..ccf4ecf166 100644
          VMSTATE_UINT32(env.acr, LinxCPU),
          VMSTATE_UINT64_ARRAY(env.gpr, LinxCPU, LINX_GPR_COUNT),
 diff --git a/target/linx/cpu.h b/target/linx/cpu.h
-index 4615d202d7..2d38017789 100644
+index 4615d202d7..4632595340 100644
 --- a/target/linx/cpu.h
 +++ b/target/linx/cpu.h
-@@ -47,9 +47,77 @@ enum {
+@@ -30,6 +30,20 @@ enum {
+     LINX_EXCP_LOAD_ACCESS_FAULT = 4, /* Load access fault */
+     LINX_EXCP_STORE_ACCESS_FAULT = 5, /* Store access fault */
+     LINX_EXCP_BAD_BRANCH_TARGET = 6, /* Branch target not at block start marker */
++    LINX_EXCP_BLOCK_FAULT = 7, /* Block-format violation (header/body legality, missing B.TEXT, etc.) */
++};
++
++/*
++ * Bring-up exception cause codes for E_BLOCK (encoded in TRAPNO.CAUSE).
++ *
++ * These are profile-defined and only used for debug/reporting today.
++ */
++enum {
++    LINX_EBLOCK_CAUSE_BAD_BRANCH_TARGET = 1,
++    LINX_EBLOCK_CAUSE_MISSING_BODY_TPC  = 2,
++    LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY   = 3,
++    LINX_EBLOCK_CAUSE_ILLEGAL_IN_HEADER = 4,
++    LINX_EBLOCK_CAUSE_DESC_OUTSIDE_BLOCK = 5,
+ };
+ enum {
+     LINX_REG_ZERO = 0,
+@@ -47,9 +61,77 @@ enum {
      LINX_GPR_COUNT = 24,
  };
  
@@ -1009,7 +1355,7 @@ index 4615d202d7..2d38017789 100644
  typedef struct CPUArchState {
      uint64_t gpr[LINX_GPR_COUNT];
      uint64_t tq[4];
-@@ -81,9 +149,30 @@ typedef struct CPUArchState {
+@@ -81,9 +163,30 @@ typedef struct CPUArchState {
      uint32_t brtype;
      uint32_t blocktype;
  
@@ -1040,7 +1386,7 @@ index 4615d202d7..2d38017789 100644
      /*
       * Tile block state (TAU bring-up).
       *
-@@ -106,11 +195,18 @@ typedef struct CPUArchState {
+@@ -106,11 +209,18 @@ typedef struct CPUArchState {
      uint32_t tile_reg[32][1024]; /* 4KB per tile (1024 x i32 words). */
      uint32_t tile_acc[1024];     /* 4KB accumulator (bring-up). */
  
@@ -1059,7 +1405,7 @@ index 4615d202d7..2d38017789 100644
      /* LR/SC reservation state (bring-up model). */
      uint64_t lr_addr;
      uint32_t lr_size;
-@@ -127,6 +223,116 @@ typedef struct CPUArchState {
+@@ -127,6 +237,116 @@ typedef struct CPUArchState {
      struct QEMUTimer *timer;
  } CPULinxState;
  
@@ -1177,10 +1523,10 @@ index 4615d202d7..2d38017789 100644
   * LinxCPU:
   * @env: #CPULinxState
 diff --git a/target/linx/helper.c b/target/linx/helper.c
-index 2fe1074cbb..dacbe600cc 100644
+index 2fe1074cbb..d03eb4373a 100644
 --- a/target/linx/helper.c
 +++ b/target/linx/helper.c
-@@ -9,12 +9,20 @@
+@@ -9,12 +9,34 @@
  #include "exec/helper-proto.h"
  #include "exec/log.h"
  #include "accel/tcg/cpu-ldst.h"
@@ -1195,13 +1541,27 @@ index 2fe1074cbb..dacbe600cc 100644
 +#include "exec/target_page.h"
 +#include "system/address-spaces.h"
 +#include "system/memory.h"
++#include <inttypes.h>
 +
 +/* Configured in target/linx/translate.c from $LINX_CALLFRAME_SIZE. */
 +extern uint64_t linx_callframe_size;
++
++static bool linx_trace_mmu_inited;
++static bool linx_trace_mmu_enabled;
++
++static inline bool linx_trace_mmu(void)
++{
++    if (!linx_trace_mmu_inited) {
++        const char *v = getenv("LINX_TRACE_MMU");
++        linx_trace_mmu_enabled = v && v[0] && strcmp(v, "0") != 0;
++        linx_trace_mmu_inited = true;
++    }
++    return linx_trace_mmu_enabled;
++}
  
  /* Semihosting operations via EBREAK immediate */
  #define LINX_SEMIHOST_EXIT      0  /* Exit program */
-@@ -47,10 +55,30 @@ enum {
+@@ -47,10 +69,30 @@ enum {
      LINX_SSR_EBARG    = 0xF0C,
      LINX_SSR_ETPC     = 0xF0D,
      LINX_SSR_EBPCN    = 0xF0E,
@@ -1232,7 +1592,7 @@ index 2fe1074cbb..dacbe600cc 100644
  /*
   * CSTATE (bring-up encoding).
   *
-@@ -105,7 +133,11 @@ static inline void linx_irq_kick_if_allowed(CPULinxState *env, uint32_t dst_acr)
+@@ -105,7 +147,11 @@ static inline void linx_irq_kick_if_allowed(CPULinxState *env, uint32_t dst_acr)
      if (env->ssr_acr[dst_acr][LINX_SSR_IPENDING] == 0) {
          return;
      }
@@ -1245,10 +1605,39 @@ index 2fe1074cbb..dacbe600cc 100644
  }
  
  /* ACRC request_type values (v0.1 draft). */
-@@ -179,6 +211,46 @@ void HELPER(linx_ssr_write)(CPULinxState *env, uint32_t ssrid, uint64_t value)
+@@ -179,6 +225,75 @@ void HELPER(linx_ssr_write)(CPULinxState *env, uint32_t ssrid, uint64_t value)
                  return;
              }
  
++            if (linx_trace_mmu()) {
++                switch (idx) {
++                case LINX_SSR_TTBR0:
++                case LINX_SSR_TTBR1:
++                case LINX_SSR_TCR:
++                case LINX_SSR_MAIR:
++                case LINX_SSR_IOTTBR:
++                case LINX_SSR_IOTCR:
++                case LINX_SSR_IOMAIR: {
++                    const char *name =
++                        (idx == LINX_SSR_TTBR0) ? "TTBR0" :
++                        (idx == LINX_SSR_TTBR1) ? "TTBR1" :
++                        (idx == LINX_SSR_TCR) ? "TCR" :
++                        (idx == LINX_SSR_MAIR) ? "MAIR" :
++                        (idx == LINX_SSR_IOTTBR) ? "IOTTBR" :
++                        (idx == LINX_SSR_IOTCR) ? "IOTCR" :
++                        "IOMAIR";
++                    fprintf(stderr,
++                            "linx: ssr_write %-6s ssrid=0x%06" PRIx32 " bank=%u idx=0x%03" PRIx32
++                            " val=0x%016" PRIx64 "\n",
++                            name, ssrid, bank, idx, value);
++                    fflush(stderr);
++                    break;
++                }
++                default:
++                    break;
++                }
++            }
++
 +            if (bank == 1) {
 +                /*
 +                 * ACR1 privileged MMU/IOMMU programming registers: validate the
@@ -1292,7 +1681,7 @@ index 2fe1074cbb..dacbe600cc 100644
              if (idx == LINX_SSR_EOIEI) {
                  /*
                   * End of interrupt (v0.1 draft): clear the pending bit for the
-@@ -201,19 +273,19 @@ void HELPER(linx_ssr_write)(CPULinxState *env, uint32_t ssrid, uint64_t value)
+@@ -201,19 +316,19 @@ void HELPER(linx_ssr_write)(CPULinxState *env, uint32_t ssrid, uint64_t value)
                   */
                  env->ssr_acr[bank][idx] = value;
  
@@ -1316,7 +1705,19 @@ index 2fe1074cbb..dacbe600cc 100644
                          return;
                      }
                      timer_mod_ns(env->timer, (int64_t)value);
-@@ -252,7 +324,7 @@ void HELPER(linx_service_request)(CPULinxState *env, uint32_t request_type,
+@@ -236,6 +351,11 @@ uint64_t HELPER(linx_ssr_swap)(CPULinxState *env, uint32_t ssrid, uint64_t value
+     return old;
+ }
+ 
++void HELPER(linx_tlb_iall)(CPULinxState *env)
++{
++    tlb_flush(env_cpu(env));
++}
++
+ /* ------------------------------------------------------------------------- */
+ /* Privilege transitions (bring-up)                                          */
+ /* ------------------------------------------------------------------------- */
+@@ -252,7 +372,7 @@ void HELPER(linx_service_request)(CPULinxState *env, uint32_t request_type,
                    " pc_next=0x%" PRIx64 "\n",
                    src_acr, request_type, bpc, tpc, pc_next);
  
@@ -1325,7 +1726,7 @@ index 2fe1074cbb..dacbe600cc 100644
      if (src_acr == 1) {
          if (request_type != LINX_SCT_MAC && request_type != LINX_SCT_SEC) {
              cs->exception_index = LINX_EXCP_ILLEGAL_INST;
-@@ -260,24 +332,27 @@ void HELPER(linx_service_request)(CPULinxState *env, uint32_t request_type,
+@@ -260,24 +380,27 @@ void HELPER(linx_service_request)(CPULinxState *env, uint32_t request_type,
          }
          dst_acr = 0;
      } else if (src_acr == 2) {
@@ -1363,7 +1764,7 @@ index 2fe1074cbb..dacbe600cc 100644
      /* Save trap state into the managing ACR bank. */
      env->ssr_acr[dst_acr][LINX_SSR_ECSTATE] = env->ssr[LINX_SSR_CSTATE];
      env->ssr_acr[dst_acr][LINX_SSR_EBPC] = bpc;
-@@ -286,7 +361,7 @@ void HELPER(linx_service_request)(CPULinxState *env, uint32_t request_type,
+@@ -286,7 +409,7 @@ void HELPER(linx_service_request)(CPULinxState *env, uint32_t request_type,
      env->ssr_acr[dst_acr][LINX_SSR_EBARG] = 0;
  
      /* Trap reporting (minimal bring-up encoding). */
@@ -1372,7 +1773,7 @@ index 2fe1074cbb..dacbe600cc 100644
      env->ssr_acr[dst_acr][LINX_SSR_TRAPARG0] = request_type;
  
      /* Disable interrupts and switch to managing ring, then vector to EVBASE. */
-@@ -309,6 +384,21 @@ void HELPER(linx_acr_enter)(CPULinxState *env, uint32_t rra_type)
+@@ -309,6 +432,35 @@ void HELPER(linx_acr_enter)(CPULinxState *env, uint32_t rra_type)
      const uint32_t target = linx_cstate_get_acr(ecstate);
      const uint64_t resume_pc = env->ssr_acr[mgr][LINX_SSR_EBPC];
  
@@ -1388,13 +1789,27 @@ index 2fe1074cbb..dacbe600cc 100644
 +        }
 +    }
 +
-+    linx_acr_save_block_state(env, mgr);
++    /*
++     * Trap return / ACR handoff.
++     *
++     * For transitions across ACRs (mgr != target), save the current block state
++     * in the manager bank and restore the target ACR's saved state.
++     *
++     * For same-ACR returns (mgr == target), do *not* overwrite the interrupted
++     * context's saved state. The interrupt/trap entry path already saved the
++     * pre-trap block/template state into acr_block_state[mgr]; restoring that
++     * state is required to resume an interrupted restartable template without
++     * clobbering progress when the handler itself executes template blocks.
++     */
++    if (target != mgr) {
++        linx_acr_save_block_state(env, mgr);
++    }
 +    linx_acr_restore_block_state(env, target);
 +
      env->acr = target;
      env->ssr[LINX_SSR_CSTATE] = ecstate;
      env->pc = resume_pc;
-@@ -1006,14 +1096,449 @@ enum {
+@@ -1006,14 +1158,449 @@ enum {
      LINX_IOT_S1R = 1u << 3,
  };
  
@@ -1846,7 +2261,7 @@ index 2fe1074cbb..dacbe600cc 100644
  }
  
  static void linx_tile_load(CPULinxState *env, unsigned dst_tile, unsigned addr_reg)
-@@ -1246,10 +1771,14 @@ static bool linx_is_bstart_at_addr(CPULinxState *env, uint64_t pc)
+@@ -1246,10 +1833,14 @@ static bool linx_is_bstart_at_addr(CPULinxState *env, uint64_t pc)
              return true;
          }
  
@@ -1862,11 +2277,28 @@ index 2fe1074cbb..dacbe600cc 100644
  
          return false;
      }
+@@ -1322,6 +1913,8 @@ void HELPER(linx_check_bstart_target)(CPULinxState *env, uint64_t target)
+     qemu_log_mask(LOG_GUEST_ERROR,
+                   "Linx: invalid branch target 0x%" PRIx64 " (not a block start marker)\n",
+                   target);
++    env->pending_trap_arg0 = target;
++    env->pending_trap_cause = LINX_EBLOCK_CAUSE_BAD_BRANCH_TARGET;
+     cs->exception_index = LINX_EXCP_BAD_BRANCH_TARGET;
+     cpu_loop_exit_restore(cs, GETPC());
+ }
 diff --git a/target/linx/helper.h b/target/linx/helper.h
-index e757a0ddfa..fd354fcc2b 100644
+index e757a0ddfa..b870b5d288 100644
 --- a/target/linx/helper.h
 +++ b/target/linx/helper.h
-@@ -16,6 +16,7 @@ DEF_HELPER_3(linx_lw_add, i64, env, i64, i32)
+@@ -2,6 +2,7 @@ DEF_HELPER_2(linx_ebreak, void, env, i32)
+ DEF_HELPER_2(linx_ssr_read, i64, env, i32)
+ DEF_HELPER_3(linx_ssr_write, void, env, i32, i64)
+ DEF_HELPER_3(linx_ssr_swap, i64, env, i32, i64)
++DEF_HELPER_1(linx_tlb_iall, void, env)
+ DEF_HELPER_5(linx_service_request, noreturn, env, i32, i64, i64, i64)
+ DEF_HELPER_2(linx_acr_enter, noreturn, env, i32)
+ 
+@@ -16,6 +17,7 @@ DEF_HELPER_3(linx_lw_add, i64, env, i64, i32)
  DEF_HELPER_3(linx_ld_add, i64, env, i64, i64)
  DEF_HELPER_2(raise_exception, noreturn, env, i32)
  DEF_HELPER_2(linx_check_bstart_target, void, env, i64)
@@ -1875,7 +2307,7 @@ index e757a0ddfa..fd354fcc2b 100644
  DEF_HELPER_5(linx_watch_load, void, env, i64, i64, i64, i32)
  DEF_HELPER_5(linx_trace_ra, void, env, i64, i32, i64, i64)
 diff --git a/target/linx/insn32.decode b/target/linx/insn32.decode
-index cd6e52456c..94473bf617 100644
+index cd6e52456c..1e00df24ed 100644
 --- a/target/linx/insn32.decode
 +++ b/target/linx/insn32.decode
 @@ -40,6 +40,26 @@
@@ -1925,7 +2357,17 @@ index cd6e52456c..94473bf617 100644
  # Block argument registers (LB0/LB1/LB2): LBx = RegSrc + uimm17
  b_dim          .... .... .... .... .... .... .100 0011 lb=%lb_dst reg=%SrcL uimm=%uimm17_20_12_7_5
  
-@@ -134,6 +167,14 @@ fret_ra       .... .... .... .... .010 .... .100 0001 uimm_hi=%fentry_uimm_hi ui
+@@ -104,6 +137,9 @@ ld_add 0000 .... .... .... .100 .... .000 1011 %RegDst %SrcL %SrcR far=%far aq=%
+ fence_d 0000 .... .... 0000 0010 0000 0010 1011 pred=%pred_imm succ=%succ_imm
+ fence_i 0001 0000 0000 0000 0010 0000 0010 1011
+ 
++# TLB flush (bring-up).
++tlb_iall 0000 0000 0011 0000 0111 0000 0010 1011
++
+ # Function entry/exit macro instructions (LinxISA spec)
+ # These encode register range [SrcBegin ~ SrcEnd] and stack size (uimm)
+ #
+@@ -134,6 +170,14 @@ fret_ra       .... .... .... .... .010 .... .100 0001 uimm_hi=%fentry_uimm_hi ui
  # FRET.STK: Function return via stack - restore registers, adjust SP, return
  fret_stk      .... .... .... .... .011 .... .100 0001 uimm_hi=%fentry_uimm_hi uimm_lo=%fentry_uimm_lo reg_begin=%fentry_begin reg_end=%fentry_end
  
@@ -1941,7 +2383,7 @@ index cd6e52456c..94473bf617 100644
  {
    setret        .... .... .... .... .... 0101 0000 0111 %imm20
 diff --git a/target/linx/translate.c b/target/linx/translate.c
-index 9b94c9394c..5d2cb3d050 100644
+index 9b94c9394c..6e9dbadd49 100644
 --- a/target/linx/translate.c
 +++ b/target/linx/translate.c
 @@ -27,6 +27,8 @@ typedef struct DisasContext {
@@ -1969,7 +2411,16 @@ index 9b94c9394c..5d2cb3d050 100644
  static TCGv_i32 cpu_tile_func;
  static TCGv_i32 cpu_tile_dtype;
  static TCGv_i32 cpu_tile_iot_valid;
-@@ -98,20 +104,13 @@ static uint64_t linx_trace_reg_pc_hi;
+@@ -61,6 +67,8 @@ static TCGv_i32 cpu_tile_iot_size;
+ static TCGv_i64 cpu_lb[3];
+ static TCGv_i64 cpu_pc;
+ static TCGv_i64 cpu_insn_count;
++static TCGv_i64 cpu_pending_trap_arg0;
++static TCGv_i32 cpu_pending_trap_cause;
+ 
+ static unsigned linx_insn_len(uint16_t hw);
+ 
+@@ -98,20 +106,13 @@ static uint64_t linx_trace_reg_pc_hi;
   * while saving/restoring callee-saved registers within the local stacksize
   * region.
   */
@@ -1991,7 +2442,7 @@ index 9b94c9394c..5d2cb3d050 100644
  static inline MemOp linx_mo_endian(void)
  {
      return MO_LE;
-@@ -174,6 +173,7 @@ static void linx_set_dest(unsigned dst, TCGv_i64 v)
+@@ -174,6 +175,7 @@ static void linx_set_dest(unsigned dst, TCGv_i64 v)
  static void linx_block_begin(DisasContext *ctx, uint8_t brtype, vaddr initial_target)
  {
      int i;
@@ -1999,7 +2450,7 @@ index 9b94c9394c..5d2cb3d050 100644
      for (i = 0; i < 4; i++) {
          tcg_gen_movi_i64(cpu_tq[i], 0);
          tcg_gen_movi_i64(cpu_uq[i], 0);
-@@ -182,6 +182,9 @@ static void linx_block_begin(DisasContext *ctx, uint8_t brtype, vaddr initial_ta
+@@ -182,6 +184,9 @@ static void linx_block_begin(DisasContext *ctx, uint8_t brtype, vaddr initial_ta
      tcg_gen_movi_i32(cpu_carg, 0);
      tcg_gen_movi_i32(cpu_brtype, brtype);
      tcg_gen_movi_i32(cpu_blocktype, 0);
@@ -2009,7 +2460,7 @@ index 9b94c9394c..5d2cb3d050 100644
      tcg_gen_movi_i32(cpu_tile_func, 0);
      tcg_gen_movi_i32(cpu_tile_dtype, 0);
      tcg_gen_movi_i32(cpu_tile_iot_valid, 0);
-@@ -196,6 +199,7 @@ static void linx_block_begin(DisasContext *ctx, uint8_t brtype, vaddr initial_ta
+@@ -196,6 +201,7 @@ static void linx_block_begin(DisasContext *ctx, uint8_t brtype, vaddr initial_ta
      tcg_gen_movi_i64(cpu_lb[1], 0);
      tcg_gen_movi_i64(cpu_lb[2], 0);
      ctx->tgt_modified = false;
@@ -2017,7 +2468,7 @@ index 9b94c9394c..5d2cb3d050 100644
      
      /* For COND blocks: set diverted target in bpc (cpu_tgt) */
      /* For DIRECT/CALL blocks: set target in bpc (cpu_tgt) */
-@@ -266,10 +270,14 @@ static bool linx_is_bstart_at_pc(CPULinxState *env, vaddr pc)
+@@ -266,10 +272,14 @@ static bool linx_is_bstart_at_pc(CPULinxState *env, vaddr pc)
              return true;
          }
  
@@ -2033,7 +2484,19 @@ index 9b94c9394c..5d2cb3d050 100644
  
          return false;
      }
-@@ -323,7 +331,42 @@ static void linx_gen_goto_tb(DisasContext *ctx, int slot, vaddr dest)
+@@ -302,7 +312,10 @@ static void linx_gen_goto_tb(DisasContext *ctx, int slot, vaddr dest)
+         qemu_log_mask(LOG_GUEST_ERROR,
+                       "Linx: jump target 0x%" VADDR_PRIx " is not a block start marker\n",
+                       dest);
+-        tcg_gen_movi_i64(cpu_pc, dest);
++        tcg_gen_movi_i64(cpu_pending_trap_arg0, dest);
++        tcg_gen_movi_i32(cpu_pending_trap_cause, LINX_EBLOCK_CAUSE_BAD_BRANCH_TARGET);
++        /* Block target checks conceptually trap at the current block start marker. */
++        tcg_gen_mov_i64(cpu_pc, cpu_bpc);
+         gen_helper_raise_exception(tcg_env,
+                                   tcg_constant_i32(LINX_EXCP_BAD_BRANCH_TARGET));
+         ctx->base.is_jmp = DISAS_NORETURN;
+@@ -323,7 +336,43 @@ static void linx_gen_goto_tb(DisasContext *ctx, int slot, vaddr dest)
  
  static void linx_gen_block_end(DisasContext *ctx, vaddr fallthrough)
  {
@@ -2059,9 +2522,10 @@ index 9b94c9394c..5d2cb3d050 100644
 +         */
 +        TCGLabel *have_body = gen_new_label();
 +        tcg_gen_brcondi_i64(TCG_COND_NE, cpu_body_tpc, 0, have_body);
-+        tcg_gen_movi_i64(cpu_pc, fallthrough);
-+        gen_helper_raise_exception(tcg_env,
-+                                  tcg_constant_i32(LINX_EXCP_ILLEGAL_INST));
++        tcg_gen_movi_i64(cpu_pending_trap_arg0, fallthrough);
++        tcg_gen_movi_i32(cpu_pending_trap_cause, LINX_EBLOCK_CAUSE_MISSING_BODY_TPC);
++        tcg_gen_mov_i64(cpu_pc, cpu_bpc);
++        gen_helper_raise_exception(tcg_env, tcg_constant_i32(LINX_EXCP_BLOCK_FAULT));
 +        tcg_gen_exit_tb(NULL, 0);
 +        gen_set_label(have_body);
 +
@@ -2077,72 +2541,102 @@ index 9b94c9394c..5d2cb3d050 100644
      gen_helper_linx_tile_commit(tcg_env);
  
      switch (ctx->brtype & 0x7) {
-@@ -512,6 +555,9 @@ static bool trans_c_bstart_std(DisasContext *ctx, uint8_t brtype)
+@@ -495,12 +544,28 @@ static bool linx_illegal(DisasContext *ctx)
+     qemu_log_mask(LOG_GUEST_ERROR, "Linx: illegal instruction @ 0x%" VADDR_PRIx " (insn_len=%u)\n",
+                   pc, ctx->cur_insn_len);
+     trace_linx_insn_decode_fail(ctx->base.pc_next, 0, ctx->cur_insn_len);
+-    tcg_gen_movi_i64(cpu_pc, ctx->base.pc_next);
++    tcg_gen_movi_i64(cpu_pending_trap_arg0, 0);
++    tcg_gen_movi_i32(cpu_pending_trap_cause, 0);
++    tcg_gen_movi_i64(cpu_pc, pc);
+     gen_helper_raise_exception(tcg_env, tcg_constant_i32(LINX_EXCP_ILLEGAL_INST));
+     ctx->base.is_jmp = DISAS_NORETURN;
+     return true;
+ }
+ 
++static bool linx_block_fault(DisasContext *ctx, uint32_t cause, uint64_t arg0)
++{
++    vaddr pc = ctx->base.pc_next - ctx->cur_insn_len;
++    qemu_log_mask(LOG_GUEST_ERROR,
++                  "Linx: block-format fault @ 0x%" VADDR_PRIx " cause=%u\n",
++                  pc, cause);
++    tcg_gen_movi_i64(cpu_pending_trap_arg0, arg0);
++    tcg_gen_movi_i32(cpu_pending_trap_cause, cause);
++    tcg_gen_movi_i64(cpu_pc, pc);
++    gen_helper_raise_exception(tcg_env, tcg_constant_i32(LINX_EXCP_BLOCK_FAULT));
++    ctx->base.is_jmp = DISAS_NORETURN;
++    return true;
++}
++
+ /* Include the auto-generated decoders. */
+ #include "decode-insn16.c.inc"
+ #include "decode-insn32.c.inc"
+@@ -512,6 +577,9 @@ static bool trans_c_bstart_std(DisasContext *ctx, uint8_t brtype)
      /* pc_next has already been advanced past the current insn, so we need to
       * check if the CURRENT instruction (pc_next - cur_insn_len) is at pc_first */
      vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      if (current_pc != ctx->base.pc_first) {
          /* BSTART in the middle of a translation block - end the previous block */
          linx_gen_block_end(ctx, current_pc);
-@@ -524,6 +570,9 @@ static bool trans_c_bstart_std(DisasContext *ctx, uint8_t brtype)
+@@ -524,6 +592,9 @@ static bool trans_c_bstart_std(DisasContext *ctx, uint8_t brtype)
  static bool trans_c_bstart_direct(DisasContext *ctx, arg_c_bstart_direct *a)
  {
      vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      if (current_pc != ctx->base.pc_first) {
          linx_gen_block_end(ctx, current_pc);
          return true;
-@@ -535,6 +584,9 @@ static bool trans_c_bstart_direct(DisasContext *ctx, arg_c_bstart_direct *a)
+@@ -535,6 +606,9 @@ static bool trans_c_bstart_direct(DisasContext *ctx, arg_c_bstart_direct *a)
  static bool trans_c_bstart_cond(DisasContext *ctx, arg_c_bstart_cond *a)
  {
      vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      if (current_pc != ctx->base.pc_first) {
          linx_gen_block_end(ctx, current_pc);
          return true;
-@@ -553,6 +605,9 @@ static bool trans_c_bstop(DisasContext *ctx, arg_c_bstop *a)
+@@ -553,6 +627,9 @@ static bool trans_c_bstop(DisasContext *ctx, arg_c_bstop *a)
  static bool trans_bstart_call(DisasContext *ctx, arg_bstart_call *a)
  {
      vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      if (current_pc != ctx->base.pc_first) {
          linx_gen_block_end(ctx, current_pc);
          return true;
-@@ -564,6 +619,9 @@ static bool trans_bstart_call(DisasContext *ctx, arg_bstart_call *a)
+@@ -564,6 +641,9 @@ static bool trans_bstart_call(DisasContext *ctx, arg_bstart_call *a)
  static bool trans_bstart_direct(DisasContext *ctx, arg_bstart_direct *a)
  {
      vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      if (current_pc != ctx->base.pc_first) {
          linx_gen_block_end(ctx, current_pc);
          return true;
-@@ -575,6 +633,9 @@ static bool trans_bstart_direct(DisasContext *ctx, arg_bstart_direct *a)
+@@ -575,6 +655,9 @@ static bool trans_bstart_direct(DisasContext *ctx, arg_bstart_direct *a)
  static bool trans_bstart_cond(DisasContext *ctx, arg_bstart_cond *a)
  {
      vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      if (current_pc != ctx->base.pc_first) {
          linx_gen_block_end(ctx, current_pc);
          return true;
-@@ -587,11 +648,16 @@ static bool trans_bstart_vpar(DisasContext *ctx, arg_bstart_vpar *a)
+@@ -587,11 +670,16 @@ static bool trans_bstart_vpar(DisasContext *ctx, arg_bstart_vpar *a)
  {
      vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
      (void)a;
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      if (current_pc != ctx->base.pc_first) {
          linx_gen_block_end(ctx, current_pc);
@@ -2154,12 +2648,12 @@ index 9b94c9394c..5d2cb3d050 100644
      return true;
  }
  
-@@ -599,17 +665,25 @@ static bool trans_bstart_vseq(DisasContext *ctx, arg_bstart_vseq *a)
+@@ -599,17 +687,25 @@ static bool trans_bstart_vseq(DisasContext *ctx, arg_bstart_vseq *a)
  {
      vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
      (void)a;
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      if (current_pc != ctx->base.pc_first) {
          linx_gen_block_end(ctx, current_pc);
@@ -2175,12 +2669,12 @@ index 9b94c9394c..5d2cb3d050 100644
  {
      vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      if (current_pc != ctx->base.pc_first) {
          linx_gen_block_end(ctx, current_pc);
          return true;
-@@ -618,12 +692,16 @@ static bool trans_bstart_tma(DisasContext *ctx, arg_bstart_tma *a)
+@@ -618,12 +714,16 @@ static bool trans_bstart_tma(DisasContext *ctx, arg_bstart_tma *a)
      tcg_gen_movi_i32(cpu_blocktype, 2); /* TMA */
      tcg_gen_movi_i32(cpu_tile_func, a->func & 0x1f);
      tcg_gen_movi_i32(cpu_tile_dtype, a->dtype & 0x1f);
@@ -2192,12 +2686,12 @@ index 9b94c9394c..5d2cb3d050 100644
  {
      vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      if (current_pc != ctx->base.pc_first) {
          linx_gen_block_end(ctx, current_pc);
          return true;
-@@ -632,11 +710,15 @@ static bool trans_bstart_cube(DisasContext *ctx, arg_bstart_cube *a)
+@@ -632,13 +732,17 @@ static bool trans_bstart_cube(DisasContext *ctx, arg_bstart_cube *a)
      tcg_gen_movi_i32(cpu_blocktype, 6); /* CUBE */
      tcg_gen_movi_i32(cpu_tile_func, a->func & 0x1f);
      tcg_gen_movi_i32(cpu_tile_dtype, a->dtype & 0x1f);
@@ -2208,32 +2702,41 @@ index 9b94c9394c..5d2cb3d050 100644
  static bool trans_b_dim(DisasContext *ctx, arg_b_dim *a)
  {
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      if (ctx->brtype == 0) {
-         return linx_illegal(ctx);
+-        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_DESC_OUTSIDE_BLOCK, 0);
      }
-@@ -652,6 +734,9 @@ static bool trans_b_dim(DisasContext *ctx, arg_b_dim *a)
+     if (a->lb > 2) {
+         return linx_illegal(ctx);
+@@ -652,8 +756,11 @@ static bool trans_b_dim(DisasContext *ctx, arg_b_dim *a)
  
  static bool trans_b_iot(DisasContext *ctx, arg_b_iot *a)
  {
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      if (ctx->brtype == 0) {
-         return linx_illegal(ctx);
+-        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_DESC_OUTSIDE_BLOCK, 0);
      }
-@@ -682,6 +767,9 @@ static bool trans_b_iot(DisasContext *ctx, arg_b_iot *a)
+ 
+     uint32_t flags = 0;
+@@ -682,8 +789,11 @@ static bool trans_b_iot(DisasContext *ctx, arg_b_iot *a)
  
  static bool trans_b_ioti(DisasContext *ctx, arg_b_ioti *a)
  {
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      if (ctx->brtype == 0) {
-         return linx_illegal(ctx);
+-        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_DESC_OUTSIDE_BLOCK, 0);
      }
-@@ -710,6 +798,70 @@ static bool trans_b_ioti(DisasContext *ctx, arg_b_ioti *a)
+ 
+     uint32_t flags = 0;
+@@ -710,6 +820,70 @@ static bool trans_b_ioti(DisasContext *ctx, arg_b_ioti *a)
      return true;
  }
  
@@ -2243,10 +2746,10 @@ index 9b94c9394c..5d2cb3d050 100644
 +    vaddr body_tpc = linx_pcrel_target(pc, a->simm25);
 +
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
 +    if (ctx->brtype == 0) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_DESC_OUTSIDE_BLOCK, 0);
 +    }
 +
 +    tcg_gen_movi_i64(cpu_body_tpc, body_tpc);
@@ -2256,10 +2759,10 @@ index 9b94c9394c..5d2cb3d050 100644
 +static bool trans_b_ior(DisasContext *ctx, arg_b_ior *a)
 +{
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
 +    if (ctx->brtype == 0) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_DESC_OUTSIDE_BLOCK, 0);
 +    }
 +    (void)a;
 +    return true;
@@ -2268,10 +2771,10 @@ index 9b94c9394c..5d2cb3d050 100644
 +static bool trans_b_attr(DisasContext *ctx, arg_b_attr *a)
 +{
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
 +    if (ctx->brtype == 0) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_DESC_OUTSIDE_BLOCK, 0);
 +    }
 +    (void)a;
 +    return true;
@@ -2280,10 +2783,10 @@ index 9b94c9394c..5d2cb3d050 100644
 +static bool trans_b_hint(DisasContext *ctx, arg_b_hint *a)
 +{
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
 +    if (ctx->brtype == 0) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_DESC_OUTSIDE_BLOCK, 0);
 +    }
 +    (void)a;
 +    return true;
@@ -2292,10 +2795,10 @@ index 9b94c9394c..5d2cb3d050 100644
 +static bool trans_b_hint_trace(DisasContext *ctx, arg_b_hint_trace *a)
 +{
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
 +    if (ctx->brtype == 0) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_DESC_OUTSIDE_BLOCK, 0);
 +    }
 +    (void)a;
 +    return true;
@@ -2304,27 +2807,42 @@ index 9b94c9394c..5d2cb3d050 100644
  static bool trans_setret(DisasContext *ctx, arg_setret *a)
  {
      vaddr pc = ctx->base.pc_next - ctx->cur_insn_len;
-@@ -720,6 +872,9 @@ static bool trans_setret(DisasContext *ctx, arg_setret *a)
+@@ -720,8 +894,11 @@ static bool trans_setret(DisasContext *ctx, arg_setret *a)
  
  static bool trans_c_setc_tgt(DisasContext *ctx, arg_c_setc_tgt *a)
  {
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      if (ctx->brtype == 0) {
-         return linx_illegal(ctx);
+-        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_DESC_OUTSIDE_BLOCK, 0);
      }
-@@ -732,6 +887,9 @@ static bool trans_c_setc_tgt(DisasContext *ctx, arg_c_setc_tgt *a)
+     TCGv_i64 v = linx_get_reg(a->SrcL);
+     tcg_gen_mov_i64(cpu_tgt, v);
+@@ -732,8 +909,11 @@ static bool trans_c_setc_tgt(DisasContext *ctx, arg_c_setc_tgt *a)
  
  static bool trans_setc_tgt(DisasContext *ctx, arg_setc_tgt *a)
  {
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      if (ctx->brtype == 0) {
-         return linx_illegal(ctx);
+-        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_DESC_OUTSIDE_BLOCK, 0);
      }
-@@ -2157,150 +2315,28 @@ static bool trans_addtpc(DisasContext *ctx, arg_addtpc *a)
+     TCGv_i64 v = linx_get_reg(a->SrcL);
+     tcg_gen_mov_i64(cpu_tgt, v);
+@@ -832,7 +1012,7 @@ static bool trans_setc_ori(DisasContext *ctx, arg_setc_ori *a)
+ static bool trans_setc_cmp(DisasContext *ctx, TCGCond c, TCGv_i64 l, TCGv_i64 r)
+ {
+     if (ctx->brtype == 0) {
+-        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_DESC_OUTSIDE_BLOCK, 0);
+     }
+     /*
+      * SETC updates block commit arguments and is frequently used to drive
+@@ -2157,150 +2337,28 @@ static bool trans_addtpc(DisasContext *ctx, arg_addtpc *a)
   *   Actual stack size = (uimm_hi << 10) | (uimm_lo << 3)
   */
  
@@ -2457,7 +2975,7 @@ index 9b94c9394c..5d2cb3d050 100644
      vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
 +    const uint64_t stacksize = ((uint64_t)a->uimm_hi << 10) | ((uint64_t)a->uimm_lo << 3);
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      if (current_pc != ctx->base.pc_first) {
          linx_gen_block_end(ctx, current_pc);
@@ -2487,13 +3005,13 @@ index 9b94c9394c..5d2cb3d050 100644
      return true;
  }
  
-@@ -2308,25 +2344,24 @@ static bool trans_fentry(DisasContext *ctx, arg_fentry *a)
+@@ -2308,25 +2366,24 @@ static bool trans_fentry(DisasContext *ctx, arg_fentry *a)
  static bool trans_fexit(DisasContext *ctx, arg_fexit *a)
  {
      vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
 +    const uint64_t stacksize = ((uint64_t)a->uimm_hi << 10) | ((uint64_t)a->uimm_lo << 3);
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      if (current_pc != ctx->base.pc_first) {
          linx_gen_block_end(ctx, current_pc);
@@ -2525,13 +3043,13 @@ index 9b94c9394c..5d2cb3d050 100644
      return true;
  }
  
-@@ -2334,29 +2369,23 @@ static bool trans_fexit(DisasContext *ctx, arg_fexit *a)
+@@ -2334,29 +2391,23 @@ static bool trans_fexit(DisasContext *ctx, arg_fexit *a)
  static bool trans_fret_ra(DisasContext *ctx, arg_fret_ra *a)
  {
      vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
 +    const uint64_t stacksize = ((uint64_t)a->uimm_hi << 10) | ((uint64_t)a->uimm_lo << 3);
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      if (current_pc != ctx->base.pc_first) {
          linx_gen_block_end(ctx, current_pc);
@@ -2566,13 +3084,13 @@ index 9b94c9394c..5d2cb3d050 100644
      ctx->base.is_jmp = DISAS_NORETURN;
      return true;
  }
-@@ -2365,29 +2394,71 @@ static bool trans_fret_ra(DisasContext *ctx, arg_fret_ra *a)
+@@ -2365,29 +2416,71 @@ static bool trans_fret_ra(DisasContext *ctx, arg_fret_ra *a)
  static bool trans_fret_stk(DisasContext *ctx, arg_fret_stk *a)
  {
      vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
 +    const uint64_t stacksize = ((uint64_t)a->uimm_hi << 10) | ((uint64_t)a->uimm_lo << 3);
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      if (current_pc != ctx->base.pc_first) {
          linx_gen_block_end(ctx, current_pc);
@@ -2596,7 +3114,7 @@ index 9b94c9394c..5d2cb3d050 100644
 +{
 +    vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
 +    if (current_pc != ctx->base.pc_first) {
 +        linx_gen_block_end(ctx, current_pc);
@@ -2629,7 +3147,7 @@ index 9b94c9394c..5d2cb3d050 100644
 +{
 +    vaddr current_pc = ctx->base.pc_next - ctx->cur_insn_len;
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
      }
 -    
 -    /* Return via RA (which was restored from stack) */
@@ -2652,27 +3170,42 @@ index 9b94c9394c..5d2cb3d050 100644
      ctx->base.is_jmp = DISAS_NORETURN;
      return true;
  }
-@@ -2717,6 +2788,9 @@ static bool trans_cmp_geui(DisasContext *ctx, arg_cmp_geui *a)
+@@ -2717,6 +2810,9 @@ static bool trans_cmp_geui(DisasContext *ctx, arg_cmp_geui *a)
  
  static bool trans_b_z(DisasContext *ctx, arg_b_z *a)
  {
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      /* B.Z: Branch if condition flag is zero */
      TCGLabel *taken = gen_new_label();
      TCGLabel *done = gen_new_label();
-@@ -2737,6 +2811,9 @@ static bool trans_b_z(DisasContext *ctx, arg_b_z *a)
+@@ -2737,6 +2833,9 @@ static bool trans_b_z(DisasContext *ctx, arg_b_z *a)
  
  static bool trans_b_nz(DisasContext *ctx, arg_b_nz *a)
  {
 +    if (ctx->in_body) {
-+        return linx_illegal(ctx);
++        return linx_block_fault(ctx, LINX_EBLOCK_CAUSE_ILLEGAL_IN_BODY, 0);
 +    }
      /* B.NZ: Branch if condition flag is non-zero */
      TCGLabel *taken = gen_new_label();
      TCGLabel *done = gen_new_label();
-@@ -3316,6 +3393,8 @@ static void linx_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
+@@ -3251,6 +3350,14 @@ static bool trans_fence_i(DisasContext *ctx, arg_fence_i *a)
+     return true;
+ }
+ 
++static bool trans_tlb_iall(DisasContext *ctx, arg_tlb_iall *a)
++{
++    (void)ctx;
++    (void)a;
++    gen_helper_linx_tlb_iall(tcg_env);
++    return true;
++}
++
+ static bool trans_ssrset(DisasContext *ctx, arg_ssrset *a)
+ {
+     TCGv_i64 src = linx_get_reg(a->SrcL);
+@@ -3316,6 +3423,8 @@ static void linx_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
      ctx->brtype = (uint8_t)env->brtype;
      ctx->brtarget = 0;
      ctx->cur_insn_len = 0;
@@ -2681,7 +3214,7 @@ index 9b94c9394c..5d2cb3d050 100644
      ctx->tgt_modified = false;
  }
  
-@@ -3515,11 +3594,15 @@ void linx_translate_init(void)
+@@ -3515,11 +3624,15 @@ void linx_translate_init(void)
                                             offsetof(CPULinxState, uq[i]),
                                             uq_names[i]);
      }
@@ -2697,233 +3230,19 @@ index 9b94c9394c..5d2cb3d050 100644
      cpu_tile_func = tcg_global_mem_new_i32(tcg_env, offsetof(CPULinxState, tile_func), "tile_func");
      cpu_tile_dtype = tcg_global_mem_new_i32(tcg_env, offsetof(CPULinxState, tile_dtype), "tile_dtype");
      cpu_tile_iot_valid = tcg_global_mem_new_i32(tcg_env, offsetof(CPULinxState, tile_iot_valid), "tile_iot_valid");
-diff --git a/scripts/linxisa/run-iommu-tile-basic.sh b/scripts/linxisa/run-iommu-tile-basic.sh
-new file mode 100755
-index 0000000000..207795ba26
---- /dev/null
-+++ b/scripts/linxisa/run-iommu-tile-basic.sh
-@@ -0,0 +1,50 @@
-+#!/usr/bin/env bash
-+set -euo pipefail
-+
-+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-+
-+LLVM_BUILD="${LLVM_BUILD:-$HOME/llvm-project/build-linxisa-clang}"
-+LLC="${LLC:-$LLVM_BUILD/bin/llc}"
-+
-+QEMU_BUILD="${QEMU_BUILD:-$ROOT/build}"
-+QEMU_BIN="${QEMU_BIN:-}"
-+
-+if [[ -z "$QEMU_BIN" ]]; then
-+  for cand in \
-+    "$QEMU_BUILD/qemu-system-linx64" \
-+    "$ROOT/build/qemu-system-linx64" \
-+    "$ROOT/build-tci/qemu-system-linx64" \
-+    "$ROOT/build-linx/qemu-system-linx64" \
-+    "$QEMU_BUILD/qemu-system-linx64-unsigned" \
-+    "$ROOT/build/qemu-system-linx64-unsigned" \
-+    "$ROOT/build-tci/qemu-system-linx64-unsigned" \
-+    "$ROOT/build-linx/qemu-system-linx64-unsigned"; do
-+    if [[ -x "$cand" ]]; then
-+      QEMU_BIN="$cand"
-+      break
-+    fi
-+  done
-+fi
-+
-+if [[ ! -x "$LLC" ]]; then
-+  echo "error: llc not found/executable: $LLC" >&2
-+  echo "       set LLC=... or LLVM_BUILD=... (see docs/linxisa/README.md)" >&2
-+  exit 1
-+fi
-+if [[ -z "$QEMU_BIN" ]]; then
-+  echo "error: qemu-system-linx64 not found." >&2
-+  echo "       set QEMU_BIN=... or QEMU_BUILD=..., or build QEMU (see docs/linxisa/README.md)" >&2
-+  exit 1
-+fi
-+
-+TMP="$(mktemp -d "${TMPDIR:-/tmp}/linxisa-iommu-tile.XXXXXX")"
-+trap 'rm -rf "$TMP"' EXIT
-+
-+OUT_O="$TMP/iommu_tile_basic.o"
-+SRC="$ROOT/tests/linxisa/iommu_tile_basic.ll"
-+
-+echo "[llc] -mtriple=linx64 $SRC"
-+"$LLC" -mtriple=linx64 -O2 -filetype=obj "$SRC" -o "$OUT_O"
-+
-+echo "[run] $QEMU_BIN -kernel $OUT_O"
-+"$QEMU_BIN" -nographic -monitor none -machine virt -kernel "$OUT_O"
-diff --git a/scripts/linxisa/run-mcopy-mset-basic.sh b/scripts/linxisa/run-mcopy-mset-basic.sh
-new file mode 100755
-index 0000000000..29d54a3181
---- /dev/null
-+++ b/scripts/linxisa/run-mcopy-mset-basic.sh
-@@ -0,0 +1,51 @@
-+#!/usr/bin/env bash
-+set -euo pipefail
-+
-+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-+
-+LLVM_BUILD="${LLVM_BUILD:-$HOME/llvm-project/build-linxisa-clang}"
-+LLVM_MC="${LLVM_MC:-$LLVM_BUILD/bin/llvm-mc}"
-+
-+QEMU_BUILD="${QEMU_BUILD:-$ROOT/build}"
-+QEMU_BIN="${QEMU_BIN:-}"
-+
-+if [[ -z "$QEMU_BIN" ]]; then
-+  for cand in \
-+    "$QEMU_BUILD/qemu-system-linx64" \
-+    "$ROOT/build/qemu-system-linx64" \
-+    "$ROOT/build-tci/qemu-system-linx64" \
-+    "$ROOT/build-linx/qemu-system-linx64" \
-+    "$QEMU_BUILD/qemu-system-linx64-unsigned" \
-+    "$ROOT/build/qemu-system-linx64-unsigned" \
-+    "$ROOT/build-tci/qemu-system-linx64-unsigned" \
-+    "$ROOT/build-linx/qemu-system-linx64-unsigned"; do
-+    if [[ -x "$cand" ]]; then
-+      QEMU_BIN="$cand"
-+      break
-+    fi
-+  done
-+fi
-+
-+if [[ ! -x "$LLVM_MC" ]]; then
-+  echo "error: llvm-mc not found/executable: $LLVM_MC" >&2
-+  echo "       set LLVM_MC=... or LLVM_BUILD=... (see docs/linxisa/README.md)" >&2
-+  exit 1
-+fi
-+if [[ -z "$QEMU_BIN" ]]; then
-+  echo "error: qemu-system-linx64 not found." >&2
-+  echo "       set QEMU_BIN=... or QEMU_BUILD=..., or build QEMU (see docs/linxisa/README.md)" >&2
-+  exit 1
-+fi
-+
-+TMP="$(mktemp -d "${TMPDIR:-/tmp}/linxisa-mcopy-mset.XXXXXX")"
-+trap 'rm -rf "$TMP"' EXIT
-+
-+OUT_O="$TMP/mcopy_mset_basic.o"
-+SRC="$ROOT/tests/linxisa/mcopy_mset_basic.s"
-+
-+echo "[llvm-mc] -triple=linx64 $SRC"
-+"$LLVM_MC" -triple=linx64 -filetype=obj "$SRC" -o "$OUT_O"
-+
-+echo "[run] $QEMU_BIN -kernel $OUT_O"
-+"$QEMU_BIN" -nographic -monitor none -machine virt -kernel "$OUT_O"
-+
-diff --git a/scripts/linxisa/run-mmu-ttbr-basic.sh b/scripts/linxisa/run-mmu-ttbr-basic.sh
-new file mode 100755
-index 0000000000..df30b89cef
---- /dev/null
-+++ b/scripts/linxisa/run-mmu-ttbr-basic.sh
-@@ -0,0 +1,51 @@
-+#!/usr/bin/env bash
-+set -euo pipefail
-+
-+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-+
-+LLVM_BUILD="${LLVM_BUILD:-$HOME/llvm-project/build-linxisa-clang}"
-+LLVM_MC="${LLVM_MC:-$LLVM_BUILD/bin/llvm-mc}"
-+
-+QEMU_BUILD="${QEMU_BUILD:-$ROOT/build}"
-+QEMU_BIN="${QEMU_BIN:-}"
-+
-+if [[ -z "$QEMU_BIN" ]]; then
-+  for cand in \
-+    "$QEMU_BUILD/qemu-system-linx64" \
-+    "$ROOT/build/qemu-system-linx64" \
-+    "$ROOT/build-tci/qemu-system-linx64" \
-+    "$ROOT/build-linx/qemu-system-linx64" \
-+    "$QEMU_BUILD/qemu-system-linx64-unsigned" \
-+    "$ROOT/build/qemu-system-linx64-unsigned" \
-+    "$ROOT/build-tci/qemu-system-linx64-unsigned" \
-+    "$ROOT/build-linx/qemu-system-linx64-unsigned"; do
-+    if [[ -x "$cand" ]]; then
-+      QEMU_BIN="$cand"
-+      break
-+    fi
-+  done
-+fi
-+
-+if [[ ! -x "$LLVM_MC" ]]; then
-+  echo "error: llvm-mc not found/executable: $LLVM_MC" >&2
-+  echo "       set LLVM_MC=... or LLVM_BUILD=... (see docs/linxisa/README.md)" >&2
-+  exit 1
-+fi
-+if [[ -z "$QEMU_BIN" ]]; then
-+  echo "error: qemu-system-linx64 not found." >&2
-+  echo "       set QEMU_BIN=... or QEMU_BUILD=..., or build QEMU (see docs/linxisa/README.md)" >&2
-+  exit 1
-+fi
-+
-+TMP="$(mktemp -d "${TMPDIR:-/tmp}/linxisa-mmu-ttbr.XXXXXX")"
-+trap 'rm -rf "$TMP"' EXIT
-+
-+OUT_O="$TMP/mmu_ttbr_basic.o"
-+SRC="$ROOT/tests/linxisa/mmu_ttbr_basic.s"
-+
-+echo "[llvm-mc] -triple=linx64 $SRC"
-+"$LLVM_MC" -triple=linx64 -filetype=obj "$SRC" -o "$OUT_O"
-+
-+echo "[run] $QEMU_BIN -kernel $OUT_O"
-+"$QEMU_BIN" -nographic -monitor none -machine virt -kernel "$OUT_O"
-+
-diff --git a/scripts/linxisa/run-tile-copy-btext.sh b/scripts/linxisa/run-tile-copy-btext.sh
-new file mode 100755
-index 0000000000..f06e0879ad
---- /dev/null
-+++ b/scripts/linxisa/run-tile-copy-btext.sh
-@@ -0,0 +1,51 @@
-+#!/usr/bin/env bash
-+set -euo pipefail
-+
-+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-+
-+LLVM_BUILD="${LLVM_BUILD:-$HOME/llvm-project/build-linxisa-clang}"
-+LLC="${LLC:-$LLVM_BUILD/bin/llc}"
-+
-+QEMU_BUILD="${QEMU_BUILD:-$ROOT/build}"
-+QEMU_BIN="${QEMU_BIN:-}"
-+
-+if [[ -z "$QEMU_BIN" ]]; then
-+  for cand in \
-+    "$QEMU_BUILD/qemu-system-linx64" \
-+    "$ROOT/build/qemu-system-linx64" \
-+    "$ROOT/build-tci/qemu-system-linx64" \
-+    "$ROOT/build-linx/qemu-system-linx64" \
-+    "$QEMU_BUILD/qemu-system-linx64-unsigned" \
-+    "$ROOT/build/qemu-system-linx64-unsigned" \
-+    "$ROOT/build-tci/qemu-system-linx64-unsigned" \
-+    "$ROOT/build-linx/qemu-system-linx64-unsigned"; do
-+    if [[ -x "$cand" ]]; then
-+      QEMU_BIN="$cand"
-+      break
-+    fi
-+  done
-+fi
-+
-+if [[ ! -x "$LLC" ]]; then
-+  echo "error: llc not found/executable: $LLC" >&2
-+  echo "       set LLC=... or LLVM_BUILD=... (see docs/linxisa/README.md)" >&2
-+  exit 1
-+fi
-+if [[ -z "$QEMU_BIN" ]]; then
-+  echo "error: qemu-system-linx64 not found." >&2
-+  echo "       set QEMU_BIN=... or QEMU_BUILD=..., or build QEMU (see docs/linxisa/README.md)" >&2
-+  exit 1
-+fi
-+
-+TMP="$(mktemp -d "${TMPDIR:-/tmp}/linxisa-tile-copy.XXXXXX")"
-+trap 'rm -rf "$TMP"' EXIT
-+
-+OUT_O="$TMP/tile_copy_btext.o"
-+
-+SRC="$ROOT/tests/linxisa/tile_copy_btext.ll"
-+
-+echo "[llc] -mtriple=linx64 $SRC"
-+"$LLC" -mtriple=linx64 -O2 -filetype=obj "$SRC" -o "$OUT_O"
-+
-+echo "[run] $QEMU_BIN -kernel $OUT_O"
-+"$QEMU_BIN" -nographic -monitor none -machine virt -kernel "$OUT_O"
+@@ -3537,6 +3650,12 @@ void linx_translate_init(void)
+     cpu_insn_count = tcg_global_mem_new_i64(tcg_env,
+                                             offsetof(CPULinxState, insn_count),
+                                             "insn_count");
++    cpu_pending_trap_arg0 =
++        tcg_global_mem_new_i64(tcg_env, offsetof(CPULinxState, pending_trap_arg0),
++                               "pending_trap_arg0");
++    cpu_pending_trap_cause =
++        tcg_global_mem_new_i32(tcg_env, offsetof(CPULinxState, pending_trap_cause),
++                               "pending_trap_cause");
+ 
+     if (callframe && callframe[0]) {
+         char *endp = NULL;
 diff --git a/tests/linxisa/iommu_tile_basic.ll b/tests/linxisa/iommu_tile_basic.ll
 new file mode 100644
 index 0000000000..a3f023156a
