@@ -9,6 +9,10 @@ Target board: Xilinx Zynq-7000 based Digilent ZYBO Z7-20.
 
 These defaults must remain compatible with existing QEMU-oriented software bring-up paths.
 
+Machine-readable form:
+
+- `docs/bringup/contracts/fpga_platform_contract.json`
+
 ## SoC integration baseline
 
 - Core is implemented in PL.
