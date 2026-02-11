@@ -26,6 +26,7 @@ SUITES: dict[str, dict[str, str]] = {
     "varargs": {"src": "tests/09_varargs.c", "macro": "LINX_TEST_ENABLE_VARARGS"},
     "tile": {"src": "tests/10_tile_matmul.cpp", "macro": "LINX_TEST_ENABLE_TILE"},
     "system": {"src": "tests/11_system.c", "macro": "LINX_TEST_ENABLE_SYSTEM"},
+    "v03_vector": {"src": "tests/12_v03_vector_tile.c", "macro": "LINX_TEST_ENABLE_V03_VECTOR"},
 }
 
 EXTRA_SOURCES_BY_SUITE: dict[str, list[str]] = {

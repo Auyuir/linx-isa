@@ -48,7 +48,7 @@ Linx uses an explicit *block split* ISA convention for control-flow:
 
 - **Block start markers** (the architectural "bstart") define legal entry points for control-flow:
   - `BSTART.*` / `C.BSTART.*` / `HL.BSTART.*`
-  - Template blocks such as `FENTRY` / `FEXIT` / `FRET.*` (and future macro blocks like `MCOPY`, `MSET`, `ESAVE`, `ERET`)
+  - Template blocks such as `FENTRY` / `FEXIT` / `FRET.*` (and future macro blocks like `MCOPY`, `MSET`, `ESAVE`, `ERCOV`)
 - **Safety rule:** every *control-flow target* (direct, conditional, indirect, call/return) must point at a block start
   marker. Branching to a non-block-start instruction raises an exception.
 

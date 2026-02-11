@@ -383,6 +383,50 @@ static void run_pto_example_kernel_tests()
     test_pass();
 }
 
+static void run_tso_store_store_order_smoke()
+{
+    /*
+     * Strict v0.3 contract requires one architectural TSO ordering domain for
+     * scalar (BCC) and tile-memory (TMA/MTC) channels. This is a bring-up smoke
+     * test that the observable store order is preserved across one scalar store
+     * followed by one TSTORE.
+     *
+     * Note: This does not attempt to create true concurrency; it is a fast gate
+     * that catches obvious channel-ordering regressions in the emulator.
+     */
+    test_start(0x000A000B);
+    uart_puts("TSO store->store ordering (scalar + TMA) ... ");
+
+    alignas(16) static int32_t SRC[1024];
+    alignas(16) static int32_t DST[1024];
+    static volatile uint32_t SCALAR_STORE;
+
+    for (unsigned i = 0; i < 1024; i++) {
+        SRC[i] = 0;
+        DST[i] = 0;
+    }
+    SRC[0] = 1;
+
+    auto t = pto::linx::tload<kTileSizeCode>(SRC);
+
+    for (unsigned iter = 0; iter < 128; iter++) {
+        SCALAR_STORE = 0;
+        DST[0] = 0;
+
+        /* Older store (scalar). */
+        SCALAR_STORE = 1;
+
+        /* Younger store (tile-memory channel). */
+        pto::linx::tstore<kTileSizeCode>(DST, t);
+
+        const uint32_t y = (uint32_t)DST[0];
+        const uint32_t x = SCALAR_STORE;
+        TEST_ASSERT(!(y == 1u && x == 0u), 0x000AB000u + iter, 1, ((uint64_t)y << 32) | x);
+    }
+
+    test_pass();
+}
+
 extern "C" void run_tile_tests(void)
 {
     test_suite_begin(0x0000000A);
@@ -390,4 +434,5 @@ extern "C" void run_tile_tests(void)
     run_auto_mode_gemm_test();
     run_auto_mode_flash_test();
     run_pto_example_kernel_tests();
+    run_tso_store_store_order_smoke();
 }

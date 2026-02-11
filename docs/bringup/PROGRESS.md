@@ -1,6 +1,6 @@
 # Bring-up Progress (strict v0.3)
 
-Last updated: 2026-02-11
+Last updated: 2026-02-12
 
 ## Phase status
 
@@ -12,7 +12,7 @@ Last updated: 2026-02-11
 | 4. QEMU runtime/system alignment | ✅ Passed | `tests/qemu/check_system_strict.sh`; `tests/qemu/run_tests.sh --all`; PTO tile suite via `run_pto_ai_kernels.py` |
 | 5. Linux userspace boot path | ✅ Passed | `smoke.py`, `full_boot.py`, `virtio_disk_smoke.py` |
 | 6. pyCircuit + Janus model alignment | ✅ Passed (bring-up scope) | `run_linx_cpu_pyc_cpp.sh`; `run_janus_bcc_pyc_cpp.sh`; `run_janus_bcc_ooo_pyc_cpp.sh`; `run_linx_qemu_vs_pyc.sh` |
-| 7. Skills/docs sync + full stack regression | 🟡 In progress | skills updated in this step; final repo pushes remain pending |
+| 7. Skills/docs sync + full stack regression | ✅ Passed | `bash tools/regression/full_stack.sh` |
 
 ## Gate snapshot
 
@@ -28,6 +28,7 @@ Last updated: 2026-02-11
 ## Latest command log
 
 - `bash tools/regression/run.sh` ✅
+- `bash tools/regression/full_stack.sh` ✅
 - `python3 tools/isa/check_no_legacy_v03.py --root . --extra-root /Users/zhoubot/qemu --extra-root /Users/zhoubot/linux --extra-root /Users/zhoubot/llvm-project` ✅
 - `python3 workloads/benchmarks/run_pto_ai_kernels.py` ✅
 - `python3 workloads/benchmarks/compare_pto_cpu_qemu.py` ✅

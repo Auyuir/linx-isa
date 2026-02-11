@@ -1,6 +1,6 @@
 # Linx Stack Alignment Matrix (strict v0.3 current)
 
-Last updated: 2026-02-11
+Last updated: 2026-02-12
 
 Legend:
 
@@ -28,6 +28,7 @@ Legend:
 ## Regression baseline
 
 - `bash tools/regression/run.sh` ✅
+- `bash tools/regression/full_stack.sh` ✅
 - `llvm-lit llvm/test/MC/LinxISA llvm/test/CodeGen/LinxISA` ✅
 - `python3 /Users/zhoubot/linux/tools/linxisa/initramfs/smoke.py` ✅
 - `python3 /Users/zhoubot/linux/tools/linxisa/initramfs/full_boot.py` ✅

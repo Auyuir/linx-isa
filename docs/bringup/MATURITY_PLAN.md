@@ -1,6 +1,6 @@
 # LinxISA Maturity Plan (strict v0.3 track)
 
-Last updated: 2026-02-11
+Last updated: 2026-02-12
 
 ## Baseline policy
 
@@ -14,6 +14,7 @@ Last updated: 2026-02-11
 
 Required evidence:
 
+- `bash tools/regression/full_stack.sh` passes.
 - `bash tools/regression/run.sh` passes.
 - `python3 tools/bringup/check26_contract.py --root .` passes.
 - `python3 tools/isa/check_no_legacy_v03.py --root . --extra-root /Users/zhoubot/qemu --extra-root /Users/zhoubot/linux --extra-root /Users/zhoubot/llvm-project` passes.

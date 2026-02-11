@@ -41,6 +41,9 @@
 #ifndef LINX_TEST_ENABLE_SYSTEM
 #define LINX_TEST_ENABLE_SYSTEM 1
 #endif
+#ifndef LINX_TEST_ENABLE_V03_VECTOR
+#define LINX_TEST_ENABLE_V03_VECTOR 0
+#endif
 
 /* Forward declarations for test suite functions */
 #if LINX_TEST_ENABLE_ARITHMETIC
@@ -75,6 +78,9 @@ void run_tile_tests(void);
 #endif
 #if LINX_TEST_ENABLE_SYSTEM
 void run_system_tests(void);
+#endif
+#if LINX_TEST_ENABLE_V03_VECTOR
+void run_v03_vector_tile_tests(void);
 #endif
 
 /* Test counters */
@@ -143,6 +149,9 @@ void _start(void) {
 #if LINX_TEST_ENABLE_SYSTEM
     uart_puts(" System");
 #endif
+#if LINX_TEST_ENABLE_V03_VECTOR
+    uart_puts(" v0.3-vector");
+#endif
     uart_puts("\r\n");
     uart_puts("\r\n");
     uart_puts("=================================================\r\n");
@@ -181,6 +190,9 @@ void _start(void) {
 #endif
 #if LINX_TEST_ENABLE_SYSTEM
     run_suite_with_stats("System & Privilege Tests", run_system_tests);
+#endif
+#if LINX_TEST_ENABLE_V03_VECTOR
+    run_suite_with_stats("v0.3 Vector/Tile Marker Tests", run_v03_vector_tile_tests);
 #endif
     
     /* Print final summary */

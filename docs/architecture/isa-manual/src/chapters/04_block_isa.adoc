@@ -307,6 +307,13 @@ For vector blocks, canonical bridge operands and mnemonic families are:
 * `TO`: vector output tile base.
 * `TS`: vector scratch tile base.
 
+Encoding/mnemonic mapping (normative):
+
+* `load.local` / `store.local` correspond to `V.*` memory ops with the `.local` qualifier set (the `L` bit in the
+  encoding). Example families: `v.lb.local`, `v.lw.local`, `v.sb.local`, `v.sw.local`.
+* `load.brg` / `store.brg` correspond to `V.*.BRG` memory ops selecting the bridged global-memory path (the `BRG`
+  variant in the mnemonic). Example families: `v.lb.brg`, `v.lw.brg`, `v.sb.brg`, `v.sw.brg`.
+
 Vector block bodies may mix scalar-uniform and vector instructions; scalar-uniform forms use scalar block-local queues
 (`t/u`) while vector forms use vector/tile-local namespaces.
 
