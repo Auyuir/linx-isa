@@ -60,7 +60,7 @@ python3 tools/isa/check_no_legacy_v02.py \
 
 ## `check_no_legacy_v03.py`
 
-Drift gate to ensure canonical v0.3 artifacts do not reintroduce non-canonical aliases (`BSTART.PAR`, `L.*`, `.kill`)
+Drift gate to ensure canonical v0.3 artifacts do not reintroduce legacy vector aliases (`L.*`, `.kill`)
 or legacy trap-save names:
 
 ```bash

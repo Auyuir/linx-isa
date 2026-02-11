@@ -49,7 +49,7 @@ _RULES: Tuple[ItemRule, ...] = (
         status="keep",
         canonical="BCC/MTC channel contract with ordering/barrier semantics",
         reason="Text is coherent with Janus microarchitecture intent",
-        patterns=("Tile Mode", "MCALL Mode", "BCC", "MTC", "同地址保序", "Acquire", "Release"),
+        patterns=("Tile Mode", "MCALL Mode", "BCC", "MTC", "\u540c\u5730\u5740\u4fdd\u5e8f", "Acquire", "Release"),
     ),
     ItemRule(
         item_id="tile_descriptor_model",
@@ -105,14 +105,18 @@ _RULES: Tuple[ItemRule, ...] = (
         status="defer",
         canonical="Legacy 0.52 fragments excluded from canonical v0.3",
         reason="Raw text includes mixed-version carryover sections",
-        patterns=("0.52引入的指令",),
+        patterns=("0.52\u5f15\u5165\u7684\u6307\u4ee4",),
     ),
     ItemRule(
         item_id="drop_editorial_prompt_sections",
         status="drop",
         canonical="Prompt/editorial text removed",
         reason="Non-normative authoring prompts are not ISA content",
-        patterns=("请结合ARM架构", "请重新帮我修饰", "好，请重新帮我修饰"),
+        patterns=(
+            "\u8bf7\u7ed3\u5408ARM\u67b6\u6784",
+            "\u8bf7\u91cd\u65b0\u5e2e\u6211\u4fee\u9970",
+            "\u597d\uff0c\u8bf7\u91cd\u65b0\u5e2e\u6211\u4fee\u9970",
+        ),
     ),
 )
 

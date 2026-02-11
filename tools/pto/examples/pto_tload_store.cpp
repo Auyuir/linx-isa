@@ -1,6 +1,8 @@
 #include <pto/linx/TileOps.hpp>
 
 extern "C" void pto_tload_store_i32(const int *src, int *dst) {
-  auto tile = pto::linx::tload<12>(src);
-  pto::linx::tstore<12>(dst, tile);
+  // v0.3 bring-up size mapping: bytes = 2^(SizeCode+4). 4KiB => SizeCode=8.
+  constexpr unsigned SizeCode = 8u;
+  auto tile = pto::linx::tload<SizeCode>(src);
+  pto::linx::tstore<SizeCode>(dst, tile);
 }

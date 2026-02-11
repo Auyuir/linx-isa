@@ -3,7 +3,7 @@
 [[mnemonic-index]]
 === Mnemonic index
 
-This table lists unique mnemonics in the v0.2 catalog. Each mnemonic may have multiple encodable forms (different lengths, operand layouts, or suffix variants).
+This table lists unique mnemonics in the v0.3 catalog. Each mnemonic may have multiple encodable forms (different lengths, operand layouts, or suffix variants).
 
 [cols="2,3,1,1",options="header"]
 |===
@@ -20,6 +20,7 @@ This table lists unique mnemonics in the v0.2 catalog. Each mnemonic may have mu
 |`ANDIW` |Arithmetic Operation 32bit |32 |1
 |`ANDW` |Arithmetic Operation 32bit |32 |1
 |`ASSERT` |Execution Control |32 |1
+|`B.ARG` |Block Argument |32 |6
 |`B.ATTR` |Block Attribute |32 |1
 |`B.DIM` |Block Argument |32 |3
 |`B.EQ` |Branch |32 |1

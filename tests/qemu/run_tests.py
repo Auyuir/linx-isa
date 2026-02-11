@@ -28,6 +28,16 @@ SUITES: dict[str, dict[str, str]] = {
     "system": {"src": "tests/11_system.c", "macro": "LINX_TEST_ENABLE_SYSTEM"},
 }
 
+EXTRA_SOURCES_BY_SUITE: dict[str, list[str]] = {
+    "tile": [
+        "tools/pto/examples/pto_tload_store.cpp",
+        "tools/pto/examples/pto_mamulb.cpp",
+        "tools/pto/examples/pto_tmatmul_acc.cpp",
+        "tools/pto/examples/pto_gemm_auto.cpp",
+        "tools/pto/examples/pto_flash_attention_auto.cpp",
+    ],
+}
+
 EXPERIMENTAL_SUITES: set[str] = set()
 
 CORE_SUITES: list[str] = [
@@ -220,6 +230,9 @@ def main(argv: list[str]) -> int:
         pto_include_dir = candidate
     sources: list[Path] = [SCRIPT_DIR / "tests" / "main.c"]
     sources += [SCRIPT_DIR / SUITES[s]["src"] for s in selected]
+    for suite in selected:
+        for rel in EXTRA_SOURCES_BY_SUITE.get(suite, []):
+            sources.append(REPO_ROOT / rel)
     if "float" in selected:
         sources.append(REPO_ROOT / "toolchain" / "libc" / "src" / "softfp" / "softfp.c")
 

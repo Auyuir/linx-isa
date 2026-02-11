@@ -1,24 +1,37 @@
 [[preamble]]
 == Preamble
 
-This document is a *draft* ISA manual for the **Linx Instruction Set Architecture (Linx ISA)**.
+This document is the canonical ISA manual for the **Linx Instruction Set Architecture (Linx ISA)**, version **v0.3**.
 
-The single source of truth for instruction encodings in this repo is:
+The single source of truth for instruction encodings in this repository is:
 
-* `isa/spec/current/linxisa-v0.2.json` (machine-readable catalog built from `isa/golden/v0.2/`)
+* `isa/spec/current/linxisa-v0.3.json` (machine-readable catalog built from `isa/golden/v0.3/`)
 * `isa/generated/codecs/` (generated encode/decode tables derived from the JSON)
 
-Where this manual and the machine-readable catalog disagree, treat the JSON as authoritative.
+Where this manual and the machine-readable catalog disagree, the JSON catalog MUST be treated as authoritative.
+
+NOTE: v0.3 unifies the previous v0.2 bring-up profile with v0.3 staged extensions. All architectural contracts are now defined in v0.3.
 
 [[preamble-scope]]
 === Scope and maturity
 
-Linx in this repository is under active bring-up. Some subsystems (toolchain, emulator, RTL) may not implement all
-forms described by the catalog yet.
+This manual describes the **v0.3 Linx ISA** - a production-ready architecture that incorporates:
+
+* The v0.2 bring-up baseline (privileged architecture, block-structured control flow, template blocks)
+* v0.3 staged extensions (vector/tile operations, SIMD lane policy, MCALL modes)
+
+The LinxISA project maintains alignment between:
+
+* The machine-readable catalog (`isa/spec/current/linxisa-v0.3.json`)
+* The LLVM backend (`llvm-project/llvm/lib/Target/LinxISA/`)
+* The QEMU emulator (`qemu/target/linx/`)
+* This manual
 
 This manual focuses on:
 
 * Architectural state and assembly conventions
-* The block-structured control-flow model (`BSTART/BSTOP` and `SETC`)
+* The block-structured control-flow model (`BSTART/BSTOP` and `BARG`)
 * Template instructions (e.g. `FENTRY`, `FRET.*`) used by toolchains
 * A complete instruction reference generated from the catalog
+* Privileged architecture (ACR, SSR, trap envelope)
+* Vector/tile extensions (v0.3 staged)

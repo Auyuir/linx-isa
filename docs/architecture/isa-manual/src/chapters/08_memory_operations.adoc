@@ -5,10 +5,9 @@ This chapter summarizes the addressing conventions used by the scalar memory ins
 instruction reference for the full set of encodings and per-form notes.
 
 [[memory-model]]
-=== Memory model and ordering (v0.3 staged, v0.2 baseline preserved)
+=== Memory model and ordering (strict v0.3 current)
 
-Linx uses a **weakly ordered** memory model suitable for out-of-order
-implementations. The ordering contract is expressed in Linx terms:
+Linx uses **TSO** as the architectural memory model. The ordering contract is expressed in Linx terms:
 
 * A **memory operation** is a load, store, atomic read-modify-write, or fence.
 * **Program order** is the architectural order of committed memory operations
@@ -16,45 +15,70 @@ implementations. The ordering contract is expressed in Linx terms:
 * A **device/MMIO** access is any access to regions defined by the platform
   as device memory (including UART-style MMIO used by bring-up).
 
-Unless a platform profile tightens the rules, the staged v0.3 contract is:
+Strict profile contract:
 
-* Plain loads/stores are **Relaxed** with respect to other addresses.
-* For a single aligned location in **Normal** memory, writes participate in a
-  coherent per-location order (software may rely on per-location coherence).
-* Ordering across different locations requires either:
-  - an atomic operation with `.aq`/`.rl` qualifiers, or
-  - an explicit fence (`FENCE.D` / `FENCE.I`).
+* Store→store order is preserved for all addresses (including `TSTORE` beats).
+* Loads may observe store-buffer behavior consistent with TSO.
+* Fences/atomics (`.aq/.rl/.aqrl`, `FENCE.D`, `FENCE.I`) provide additional ordering constraints.
 
-NOTE: This chapter defines the architectural contract in a style similar to Arm
-barrier definitions, but using Linx terms (LXCPU, commit, and the Block ISA
-execution model). A platform profile MAY define stronger ordering for
-performance or compatibility.
+NOTE: Implementations may be stronger than TSO, but software must not depend on stronger-than-TSO behavior unless a
+platform profile states so.
 
 [[memory-channels]]
-=== BCC and MTC channels (v0.3 staged)
+=== BCC and MTC channels (strict v0.3)
 
-v0.3 staged bring-up explicitly models two architectural memory issue channels:
+Strict v0.3 explicitly models two architectural memory issue channels:
 
 * **BCC channel**: scalar `load/store/atomic/fence` operations and ordering point for scalar blocks.
 * **MTC channel**: tile-oriented memory blocks (`TLOAD`, `TSTORE`, `TPREFETCH`) and staged MCALL-like memory mode.
 
-Staged rules:
+Rules:
 
-* In normal tile mode, BCC and MTC requests share one architectural ordering contract (`Program order` + fences/aq/rl).
+* In normal tile mode, BCC and MTC requests share one architectural TSO ordering domain.
 * Entering MCALL-like mode requires an acquire-style boundary before MTC-only execution begins.
 * Exiting MCALL-like mode requires a release-style boundary before subsequent scalar blocks execute.
 * While MCALL-like mode is active, scalar memory issue is architecturally closed for correctness.
 
 [[memory-tload-tstore]]
-=== TLOAD/TSTORE staged semantics
+=== TLOAD/TSTORE semantics
 
 `TLOAD` and `TSTORE` are template-style tile memory operations. The staged architectural model is:
 
-* Address footprint is 2D and derived from base/stride/dimension state (`RegSrc0`, `RegSrc1`, `LB0/LB1`).
+* Address footprint is 2D and derived from descriptor state:
+  - dimensions from `LB0/LB1` (`B.DIM`)
+  - layout format from `B.ARG` (both compact `format` and named v0.3 forms such as `ND2ZN.normal`, `DN2NZ.normal`,
+    `NZ2DN.canon`, `NORM.normal`)
+  - GPR bindings from one-or-more `B.IOR` descriptors
+  - tile IO bindings and transfer size from one-or-more `B.IOT/B.IOTI`
+
+Bring-up (auto-mode) binding convention for `B.IOR` in `TLOAD/TSTORE`:
+
+* The effective base pointer register is taken from the most recent `B.IOR` in the header:
+  - prefer `RegSrc1` when it is non-zero,
+  - otherwise fall back to `RegSrc0` (legacy/base-only streams).
+* When both are present, `RegSrc0` is treated as a stride/leading-dimension register and `RegSrc1` as the base pointer.
+  Canonical disassembly prints the raw register list in encoding order (`[RegSrc0,RegSrc1,...]`), so the base pointer
+  commonly appears as the *second* entry (for example `B.IOR [s0,a6],[]`).
 * A single `TLOAD`/`TSTORE` may decompose into multiple internal memory beats; completion is not atomic to observers.
 * Internal beats of one operation are not guaranteed to issue in source-program order.
 * Unaligned shared-memory access is allowed in staged profile unless tightened by platform policy.
 * Group-overlap contracts that are unresolved in raw v0.3 material are deferred from canonical spec behavior.
+
+Canonical strict-v0.3 profile constraints:
+
+* `B.ARG + B.IOR` are mandatory in descriptor-rich `TLOAD/TSTORE` headers.
+* Repeated `B.IOR` and repeated `B.IOT/B.IOTI` are legal and are consumed in header order.
+* For bring-up code size, emit `C.B.DIMI` for `LB0/LB1/LB2` when the value fits in `imm8` (and `RegSrc=zero`).
+* Unresolved raw contracts (`group=2`, broad fixed-pipe/TCVT metadata flows) are explicitly deferred from canonical behavior.
+
+Canonical strict-v0.3 disassembly form for tile memory blocks is:
+
+* `BSTART.TMA TLOAD, <DataType>` for tile loads
+* `BSTART.TMA TSTORE, <DataType>` for tile stores
+* Compatibility PAR-style forms are accepted for input only and normalized to typed forms.
+
+`B.IOTI` descriptor rendering uses `last` for the terminal descriptor and prints transfer footprints in KiB (for example
+`->t<1KB>`, `->acc<4KB>`). The strict architectural range is `512B..4KB`.
 
 [[memory-mcall]]
 === MCALL staged semantics
@@ -62,7 +86,8 @@ Staged rules:
 MCALL-like behavior remains staged through `.MPAR/.MSEQ` execution modes:
 
 * Execution is non-speculative until declared input dependencies (`B.IOT`/`B.IOD`) are resolved.
-* Prior side-effecting tile stores must be globally ordered before MCALL-like execution starts.
+* Prior side-effecting tile stores must be globally ordered before MCALL-like execution starts (TSO-preserving barrier
+  requirement).
 * Detailed VREG-only local register semantics from raw notes are deferred until fully reconciled.
 
 [[memory-types]]
@@ -156,7 +181,7 @@ Several immediate-offset families encode an immediate that is implicitly scaled 
 * word: scale 4 (`<< 2`)
 * doubleword: scale 8 (`<< 3`)
 
-Unscaled variants are typically spelled with a `.U` suffix (e.g. `LWI.U`, `LDI.U`) and use the immediate value in
+Unscaled variants use a `.U` suffix (e.g. `LWI.U`, `LDI.U`) and use the immediate value in
 bytes without the implicit shift.
 
 [[memory-pcrel]]

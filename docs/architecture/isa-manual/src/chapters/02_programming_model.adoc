@@ -7,6 +7,15 @@
 An **LXCPU** is the architectural execution context that fetches, decodes, and executes Linx instructions. Each LXCPU
 has independent architectural state (GPRs, system registers, and per-block ClockHands queues).
 
+Linx is a **block-structured** instruction set architecture with two architectural state layers:
+
+* **GSTATE** (first layer, shared architectural contract):
+** 24 architectural GPRs (`R0..R23`) used by software-visible scalar state
+** 32 architectural tile registers
+** SSR/system state
+* **BSTATE** (second layer, block-local architectural contract):
+** scalar/vector/template block-local state with block-type-dependent structure
+
 [[progmodel-pc]]
 === Program counters (TPC / BPC)
 
@@ -47,6 +56,9 @@ include::../generated/registers_reg5.adoc[]
 NOTE: The v0.2/v0.3 `reg5` table also includes special spellings used by the assembler/disassembler for queue operations
 (e.g. destination selectors `t`/`u` used as `->t` / `->u`). These are not general-purpose
 architectural registers in the same sense as `a0`, `s0`, etc.
+
+Strict profile note: while the encoding space has 32 codes, the software architectural GSTATE set is constrained to
+24 GPRs (`R0..R23`) by the bring-up profile contract.
 
 [[progmodel-clockhands]]
 === Block-local temporaries (ClockHands)
@@ -93,15 +105,21 @@ For `BSTART.VPAR`/`BSTART.VSEQ` execution, v0.3 staged profile locks an explicit
 === Tile registers (TAU)
 
 Linx defines a tile register file used by accelerator-oriented *tile blocks* (e.g. `BSTART.TMA`, `BSTART.CUBE`,
-`BSTART.VPAR`, `BSTART.VSEQ`).
+`BSTART.MPAR`, `BSTART.MSEQ`, `BSTART.VPAR`, `BSTART.VSEQ`).
 
 Bring-up model:
 
 * 32 architectural tile registers, organized as **4 hands × 8 depth**.
-* Each tile register holds **4 KiB** of data (1024 × 32-bit words).
+* Each tile register has a tracked architectural size in the closed range **512B..4KB**.
+* The architectural tile-state capacity is **128KB** (`32 × 4KB`).
+* Implementations MAY internally provision a larger backing store per tile register, but MUST preserve the architectural
+  behavior that operations only read/write within the currently allocated size for each tile.
+* Each hand is architecturally treated as a **tile register queue** addressed by `hand#k` references:
+  - `hand#1` is the most recent definition,
+  - tile-producing ops allocate by pushing a new `hand#1`,
+  - `.reuse` is a staged hint bit carried on inputs (see <<blockisa-tile>>).
 * Tile blocks bind tile inputs/outputs using block descriptors (`B.IOT`/`B.IOTI` for tiles, `B.IOR` for GPRs).
-* `B.IOTI` provides the tile transfer size using a `Size` immediate (convention: `Size = log2(bytes)`, so `Size=12`
-  denotes 4 KiB).
+* Canonical disassembly prints the destination kind plus the allocation size (for example `->t<4KB>`).
 
 [[progmodel-barg]]
 === Block argument register (BARG)

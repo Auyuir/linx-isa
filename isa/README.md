@@ -8,14 +8,14 @@ This directory is the **single source of truth** for the LinxISA instruction-set
 
 ## What is authoritative?
 
-- Golden sources (authoritative, current): `isa/golden/v0.2/**`
-- Compiled catalog (checked in, current): `isa/spec/current/linxisa-v0.2.json`
-- Legacy catalog (kept for reference): `isa/spec/current/linxisa-v0.1.json`
+- Golden sources (authoritative, current): `isa/golden/v0.3/**`
+- Compiled catalog (checked in, current): `isa/spec/current/linxisa-v0.3.json`
+- Legacy catalogs (kept for reference): `isa/spec/current/linxisa-v0.2.json`, `isa/spec/current/linxisa-v0.1.json`
 
 Build the compiled catalog from golden sources:
 
 ```bash
-python3 tools/isa/build_golden.py --in isa/golden/v0.2 --out isa/spec/current/linxisa-v0.2.json --pretty
+python3 tools/isa/build_golden.py --profile v0.3 --pretty
 ```
 
 ## ELF Machine Type
@@ -86,20 +86,20 @@ Conditional transitions use a two-step convention:
 1. Set the block condition using `SETC.*` / `C.SETC.*`
 2. Select the next block using a conditional block header (e.g. `BSTART.* COND, <target>`)
 
-### Commit arguments (CARG)
+### Commit arguments (BARG)
 
-Blocks carry block-internal control-flow state called **commit arguments** (**CARG**). CARG is similar in spirit to a
+Blocks carry block-internal control-flow state called **commit arguments** (**BARG**). BARG is similar in spirit to a
 condition flags register on other architectures, but it is committed at block boundaries.
 
 Bring-up model:
 
-- CARG includes the block's intended exit kind (e.g. FALL/DIRECT/COND/CALL/RET/IND/ICALL), any predicate/condition, and
+- BARG includes the block's intended exit kind (e.g. FALL/DIRECT/COND/CALL/RET/IND/ICALL), any predicate/condition, and
   the selected next target (PC-relative or register-based).
 - `BSTART.*` initializes the block's branch kind/target defaults.
-- `SETC.*` updates CARG (predicate/selection) and must execute *inside a block* (after a block start marker).
-- At block commit (`BSTOP` or the next block start marker), the execution engine consults CARG and commits the
+- `SETC.*` updates BARG (predicate/selection) and must execute *inside a block* (after a block start marker).
+- At block commit (`BSTOP` or the next block start marker), the execution engine consults BARG and commits the
   block-to-block control-flow.
-- Context switches must preserve CARG as part of the LXCPU architectural state.
+- Context switches must preserve BARG as part of the LXCPU architectural state.
 
 ### Assembly/disassembly conventions
 
@@ -128,7 +128,7 @@ The intended end-to-end flow is:
 
 1. **C source** (`.c/.h`)
 2. **Compiler** (`compiler/`) emits LinxISA assembly / object code
-3. **ISA spec** (`isa/spec/current/linxisa-v0.2.json`) is referenced for encoding/decoding + semantics
+3. **ISA spec** (`isa/spec/current/linxisa-v0.3.json`) is referenced for encoding/decoding + semantics
 4. **Emulator** (`emulator/`) executes the same semantics as the spec
 5. **RTL** (`rtl/`) implements the same decode + architectural behavior as the spec
 

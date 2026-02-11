@@ -12,7 +12,22 @@ Run benchmark workloads:
 python3 workloads/benchmarks/run_benchmarks.py
 ```
 
+Run the PTO AI kernel bring-up benchmark flow (auto-mode GEMM + flash-attention):
+
+```bash
+python3 workloads/benchmarks/run_pto_ai_kernels.py
+```
+
+Run PTO CPU sim + Linx QEMU checksum matching for GEMM/flash:
+
+```bash
+python3 workloads/benchmarks/compare_pto_cpu_qemu.py
+```
+
 Primary codegen-quality artifacts:
 
 - `workloads/generated/objdump/`
 - `workloads/generated/report.md`
+- `workloads/generated/objdump/pto_ai/`
+- `workloads/generated/pto_ai_report.md`
+- `workloads/generated/pto_qemu_value_match.md`

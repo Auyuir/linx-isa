@@ -22,6 +22,21 @@ Build + run everything and write `workloads/generated/report.md`:
 python3 workloads/benchmarks/run_benchmarks.py
 ```
 
+Compile and run PTO AI kernels (auto-mode GEMM + flash-attention), validate
+tile-group usage (T/U/M/N on auto kernels), and emit objdumps + report for
+all PTO example kernels (`tload_store`, `mamulb`, `tmatmul_acc`,
+`gemm_auto`, `flash_attention_auto`):
+
+```bash
+python3 workloads/benchmarks/run_pto_ai_kernels.py
+```
+
+Run PTO CPU sim baselines and verify GEMM/flash checksums against Linx QEMU:
+
+```bash
+python3 workloads/benchmarks/compare_pto_cpu_qemu.py
+```
+
 Override tool paths:
 
 ```bash
@@ -38,3 +53,6 @@ Generated artifacts are written under:
 - `workloads/generated/objdump/` (codegen-quality inspection)
 - `workloads/generated/qemu/`
 - `workloads/generated/report.md` (static/dynamic instruction counts and histograms)
+- `workloads/generated/objdump/pto_ai/` (PTO GEMM/flash auto-mode objdumps)
+- `workloads/generated/pto_ai_report.md` (PTO AI kernel validation report)
+- `workloads/generated/pto_qemu_value_match.md` (PTO CPU sim vs QEMU checksum match report)

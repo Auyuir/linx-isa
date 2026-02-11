@@ -8,16 +8,22 @@ namespace linx {
 
 using TileI32 = int __attribute__((vector_size(4096)));
 
-template <unsigned SizeCode>
+template <unsigned SizeCode, unsigned Layout = 0, unsigned LB0 = 0, unsigned LB1 = 0>
 __attribute__((always_inline)) inline TileI32 tload(const void *base) {
   static_assert(SizeCode <= 31, "tload size-code must fit 5 bits");
-  return __builtin_linx_tma_tload(base, SizeCode);
+  static_assert(Layout <= 31, "tload layout must fit 5 bits");
+  static_assert(LB0 <= 0x1ffff, "tload LB0 must fit 17 bits");
+  static_assert(LB1 <= 0x1ffff, "tload LB1 must fit 17 bits");
+  return __builtin_linx_tma_tload_desc(base, Layout, LB0, LB1, SizeCode);
 }
 
-template <unsigned SizeCode>
+template <unsigned SizeCode, unsigned Layout = 0, unsigned LB0 = 0, unsigned LB1 = 0>
 __attribute__((always_inline)) inline void tstore(void *base, TileI32 tile) {
   static_assert(SizeCode <= 31, "tstore size-code must fit 5 bits");
-  __builtin_linx_tma_tstore(base, tile, SizeCode);
+  static_assert(Layout <= 31, "tstore layout must fit 5 bits");
+  static_assert(LB0 <= 0x1ffff, "tstore LB0 must fit 17 bits");
+  static_assert(LB1 <= 0x1ffff, "tstore LB1 must fit 17 bits");
+  __builtin_linx_tma_tstore_desc(base, tile, Layout, LB0, LB1, SizeCode);
 }
 
 template <unsigned M, unsigned N, unsigned K>
@@ -34,8 +40,7 @@ __attribute__((always_inline)) inline TileI32 tmatmul(TileI32 lhs, TileI32 rhs) 
 
 template <unsigned M, unsigned N, unsigned K>
 __attribute__((always_inline)) inline TileI32 tmatmul_acc(TileI32 acc, TileI32 lhs, TileI32 rhs) {
-  (void)acc;
-  return mamulb<M, N, K>(lhs, rhs);
+  return __builtin_linx_cube_mamulb_acc(acc, lhs, rhs, M, N, K);
 }
 
 template <unsigned M, unsigned N, unsigned K>

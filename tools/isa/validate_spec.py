@@ -148,7 +148,7 @@ def main() -> int:
     ap.add_argument(
         "--profile",
         choices=["v0.2", "v0.3"],
-        default="v0.2",
+        default="v0.3",
         help="ISA profile for default --spec path",
     )
     ap.add_argument(
@@ -159,7 +159,7 @@ def main() -> int:
     args = ap.parse_args()
 
     default_spec = (
-        "isa/spec/v0.3/linxisa-v0.3.json"
+        "isa/spec/current/linxisa-v0.3.json"
         if args.profile == "v0.3"
         else "isa/spec/current/linxisa-v0.2.json"
     )

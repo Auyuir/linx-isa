@@ -1,28 +1,38 @@
-# Linx Stack Alignment Matrix (v0.2 stable + v0.3 staged)
+# Linx Stack Alignment Matrix (strict v0.3 current)
 
 Last updated: 2026-02-11
 
-This document tracks **end-to-end alignment** of the Linx stack (spec → compiler → emulator → OS → RTL/models) for
-bring-up-critical features. It is intended to be kept up-to-date as work lands across repos under `~/`.
-
 Legend:
 
-- ✅ implemented + tested
-- 🟡 implemented but missing tests / incomplete
-- ❌ not implemented
+- ✅ implemented + validated
+- 🟡 implemented but partial coverage
+- ❌ missing
 
-## Feature matrix
+## Current source-of-truth
 
-| Feature | Spec (linxisa) | Golden (linxisa) | LLVM (llvm-project) | QEMU (qemu) | Linux (linux) | RTL (linxisa/Janus) | pyCircuit/Janus SW model | Tests/Gates |
-|---|---|---|---|---|---|---|---|---|
-| v0.3 raw reconciliation + defer ledger | ✅ `isa/golden/v0.3/reconcile/reconcile_notes.md` | ✅ `isa/golden/v0.3/reconcile/reconcile_report.json` | ✅ parser/codegen aliases + tests landed | ✅ runtime alignment gated | 🟡 ABI unchanged baseline | 🟡 Janus keyword alignment checked | ❌ (pending) | ✅ `tools/isa/reconcile_v03_raw.py`; ✅ zero unclassified raw tokens |
-| v0.3 canonical alias policy (`V.*`, typed `BSTART.*`, no legacy kill-annotation) | ✅ `docs/architecture/isa-manual/src/chapters/{02,04,08}_*.adoc` | ✅ `isa/spec/v0.3/linxisa-v0.3.json` | ✅ lit tests: `llvm/test/{MC,CodeGen}/LinxISA/v03-*` | ✅ alias traps in `target/linx` + clean runtime output | 🟡 not kernel ABI visible | ❌ (pending) | ❌ (pending) | ✅ `tools/isa/check_no_legacy_v03.py`; ✅ strict gate in `tests/qemu/check_system_strict.sh` |
-| Decoupled blocks (`BSTART.<type>` header + `B.TEXT` body) | ✅ `docs/architecture/isa-manual/src/chapters/04_block_isa.adoc` (`blockisa-forms-decoupled`) | ✅ `isa/spec/current/linxisa-v0.2.json` (opcode: `B.TEXT`) | ✅ `llvm/lib/Target/LinxISA/LinxISABlockify.cpp` | ✅ `target/linx/insn32.decode`, `target/linx/translate.c`, `target/linx/cpu.h` | 🟡 `arch/linx/` trap/resume aligned; decoupled execution not used by Linux yet | ❌ (pending) | ❌ (pending) | ✅ QEMU: `qemu/scripts/linxisa/run-tile-copy-btext.sh`; ✅ LLVM lit: `llvm/test/CodeGen/LinxISA/*` |
-| Restartable templates (`FENTRY/FEXIT/FRET*/MCOPY/MSET`) | ✅ `docs/architecture/isa-manual/src/chapters/06_templates.adoc`, `docs/architecture/isa-manual/src/chapters/09_system_and_privilege.adoc` | ✅ `isa/spec/current/linxisa-v0.2.json` (template opcodes) | ✅ prologue/epilogue + template emission: `llvm/lib/Target/LinxISA/*` | ✅ `target/linx/translate.c`, `target/linx/helper.c` | 🟡 trap routing + `TRAPNO` decode aligned; EBSTATE/template-restart integration pending | ❌ (pending) | ❌ (pending) | ✅ QEMU: `qemu/scripts/linxisa/run-mcopy-mset-basic.sh` |
-| v0.2 trap ABI (`TRAPNO` encoding + `EBARG` group + `ACRC/ACRE`) | ✅ `docs/architecture/isa-manual/src/chapters/09_system_and_privilege.adoc`, `docs/architecture/isa-manual/src/generated/trapno_encoding.adoc` | ✅ `isa/golden/v0.2/state/system_registers.json` (`trapno_encoding`, `ebarg_group`) | ✅ SSR symbol names + EBARG IDs in `llvm/lib/Target/LinxISA/{AsmParser,MCTargetDesc}` | ✅ `target/linx/{cpu.c,helper.c,translate.c}` | ✅ `arch/linx/kernel/{entry.S,traps.c}` | ❌ (pending) | ❌ (pending) | ✅ `tools/isa/validate_spec.py` (v0.2 guards); ✅ denylist gate `tools/isa/check_no_legacy_v02.py`; ✅ cross-repo legacy scan (`--extra-root`); ✅ QEMU runtime: `tests/qemu/tests/11_system.c` |
-| Debug BP/WP SSRs + traps (linking bring-up subset) | ✅ `isa/golden/v0.2/state/system_registers.json` (`debug_ssr`) + manual text | ✅ `isa/spec/current/linxisa-v0.2.json` | ✅ SSR symbol names in `llvm/lib/Target/LinxISA/{AsmParser,MCTargetDesc}` | ✅ `target/linx/helper.c` (matching + trap delivery) | ✅ trap decode + SIGTRAP: `arch/linx/kernel/traps.c` | ❌ (pending) | ❌ (pending) | ✅ directed runtime tests: `tests/qemu/tests/11_system.c` (DBG_BP/DBG_WP/DBG_BP_RESUME); ✅ strict gate: `tests/qemu/check_system_strict.sh` (IDs `0x1100..0x110E`) |
-| PTO minimal bridge (`tload/tstore/mamulb/tmatmul_acc`) | ✅ bridge header `toolchain/pto/include/pto/linx/TileOps.hpp` | ✅ canonical asm emitted in `tools/pto/out/` | ✅ backend intrinsics wired (`llvm.linx.*`) | ✅ tile suite runs in QEMU (`tests/qemu/tests/10_tile_matmul.cpp`) | 🟡 userspace integration deferred | ❌ (pending) | ❌ (pending) | ✅ `tools/pto/run_v03_pto_to_linx.sh`; ✅ `tests/qemu/run_tests.sh --suite tile` |
-| ESAVE/ERCOV template blocks | ✅ `docs/architecture/isa-manual/src/chapters/06_templates.adoc` | ✅ `isa/golden/v0.2/opcodes/lx_32.opc` + `isa/spec/current/linxisa-v0.2.json` | 🟡 asm/disasm pending | ✅ `target/linx/helper.c` | ❌ (pending) | ❌ (pending) | ❌ (pending) | ❌ directed tests (pending) |
-| TTBR0/TTBR1 CPU MMU | ✅ `docs/architecture/isa-manual/src/chapters/09_system_and_privilege.adoc` | ✅ `isa/spec/current/linxisa-v0.2.json` | ❌ (none) | ✅ `target/linx/cpu.c` (page walk), `target/linx/helper.c` (TLB maint) | ❌ (CONFIG_MMU=n; page tables not implemented) | ❌ (pending) | ❌ (pending) | ✅ QEMU: `qemu/scripts/linxisa/run-mmu-ttbr-basic.sh` |
-| IOMMU (DMA/TMA translation) | ✅ `docs/architecture/isa-manual/src/chapters/09_system_and_privilege.adoc` | ✅ `isa/spec/current/linxisa-v0.2.json` | ❌ (none) | ✅ `target/linx/helper.c` (tile IOMMU walk) | ❌ (pending) | ❌ (pending) | ❌ (pending) | ✅ QEMU: `qemu/scripts/linxisa/run-iommu-tile-basic.sh` |
-| TMA `TLOAD/TSTORE` ordering vs scalar LSU | ✅ `isa/golden/v0.2/state/memory_model.json` | ✅ `isa/spec/current/linxisa-v0.2.json` | 🟡 (compiler emits ordered blocks; fence/aq/rl coverage pending) | 🟡 enforce in `target/linx/` (serialize at block boundaries) | ❌ (pending) | ❌ (pending) | ❌ (pending) | 🟡 directed/litmus pending |
+- Current ISA catalog: `isa/spec/current/linxisa-v0.3.json`
+- Legacy ISA catalog: `isa/spec/current/linxisa-v0.2.json` (non-default)
+- Machine-checkable contract: `docs/bringup/check26_contract.yaml`
+- Contract gate: `tools/bringup/check26_contract.py`
+
+## Cross-stack alignment summary
+
+| Area | linxisa spec/docs | LLVM | QEMU | Linux | pyCircuit/Janus | Gate/evidence |
+| --- | --- | --- | --- | --- | --- | --- |
+| 26-check contract freeze | ✅ check26 docs + gate landed | ✅ mapped in MC/CodeGen tests | ✅ mapped in system/tile tests | ✅ validated by boot flows | ✅ validated by cpp + trace diff | `python3 tools/bringup/check26_contract.py --root .` |
+| Canonical v0.3 asm policy (`V.*`, typed `BSTART.*`) | ✅ docs/tooling defaulted to v0.3 | ✅ MC/CodeGen updated | ✅ runtime accepts canonical typed forms | 🟡 ABI unchanged (v0.2 baseline trap ABI) | 🟡 model traces aligned; parser policy external | `python3 tools/isa/check_no_legacy_v03.py --root . --extra-root ...` |
+| Block/descriptor contracts (`B.ARG/B.IOR/B.IOT/C.B.DIMI`) | ✅ manual + generated refs | ✅ descriptor emission/tests | ✅ descriptor execution and tile tests | ✅ userspace boot not regressed | ✅ model runs with matching traces | `bash tools/regression/run.sh`; `python3 workloads/benchmarks/run_pto_ai_kernels.py` |
+| ACR/IRQ/exception correctness | ✅ privileged chapter + generated trap table | ✅ MC symbols + encodings | ✅ strict system tests | ✅ smoke/full/virtio boots pass | ✅ qemu-vs-pyc commit diff pass | `tests/qemu/check_system_strict.sh`; linux initramfs scripts |
+| PTO auto-mode AI kernels (GEMM + Flash) | ✅ workload docs + generated reports | ✅ compiler emits runnable kernels | ✅ qemu tile suite + checksum outputs | 🟡 kernel-side selftest deferred | 🟡 model-side perf not yet tiered | `python3 workloads/benchmarks/run_pto_ai_kernels.py`; `python3 workloads/benchmarks/compare_pto_cpu_qemu.py` |
+
+## Regression baseline
+
+- `bash tools/regression/run.sh` ✅
+- `llvm-lit llvm/test/MC/LinxISA llvm/test/CodeGen/LinxISA` ✅
+- `python3 /Users/zhoubot/linux/tools/linxisa/initramfs/smoke.py` ✅
+- `python3 /Users/zhoubot/linux/tools/linxisa/initramfs/full_boot.py` ✅
+- `python3 /Users/zhoubot/linux/tools/linxisa/initramfs/virtio_disk_smoke.py` ✅
+- `bash /Users/zhoubot/pyCircuit/tools/run_linx_cpu_pyc_cpp.sh` ✅
+- `bash /Users/zhoubot/pyCircuit/janus/tools/run_janus_bcc_pyc_cpp.sh` ✅
+- `bash /Users/zhoubot/pyCircuit/janus/tools/run_janus_bcc_ooo_pyc_cpp.sh` ✅
+- `QEMU_BIN=/Users/zhoubot/qemu/build-tci/qemu-system-linx64 bash /Users/zhoubot/pyCircuit/tools/run_linx_qemu_vs_pyc.sh` ✅

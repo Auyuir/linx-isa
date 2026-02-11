@@ -10,8 +10,8 @@
 |Arithmetic Operation 64bit |21 |21
 |Arithmetic Operation 32bit |21 |21
 |PC-Relative |4 |4
+|Block Argument |9 |2
 |Block Attribute |1 |1
-|Block Argument |3 |1
 |Branch |10 |10
 |Block Hint |2 |1
 |Block Input & Output |6 |4

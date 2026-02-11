@@ -7,8 +7,8 @@ Golden sources live under versioned roots such as:
   isa/golden/v0.3/
 
 Compiled outputs are checked in at:
-  isa/spec/current/linxisa-v0.2.json
-  isa/spec/v0.3/linxisa-v0.3.json
+  isa/spec/current/linxisa-v0.3.json
+  isa/spec/current/linxisa-v0.2.json (legacy)
 
 This builder is intentionally deterministic:
   - no timestamps
@@ -595,7 +595,7 @@ def _canonical_json(obj: Any) -> str:
 
 def _profile_defaults(profile: str) -> Tuple[str, str]:
     if profile == "v0.3":
-        return "isa/golden/v0.3", "isa/spec/v0.3/linxisa-v0.3.json"
+        return "isa/golden/v0.3", "isa/spec/current/linxisa-v0.3.json"
     return "isa/golden/v0.2", "isa/spec/current/linxisa-v0.2.json"
 
 
@@ -604,7 +604,7 @@ def main() -> int:
     ap.add_argument(
         "--profile",
         choices=["v0.2", "v0.3"],
-        default="v0.2",
+        default="v0.3",
         help="ISA profile for default in/out paths",
     )
     ap.add_argument("--in", dest="in_dir", default=None, help="Golden source directory")

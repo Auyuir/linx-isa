@@ -88,6 +88,23 @@
 |`SETRET` |32 |- |`setret uimm, ->Ra` |-
 |===
 
+[[insnref-block-argument]]
+=== Block Argument
+
+[cols="1,1,2,4,6",options="header"]
+|===
+|Mnemonic |Len |Decode |Assembly |Notes
+|`B.ARG` |32 |- |`B.ARG NORM.normal` |-
+|`B.ARG` |32 |- |`B.ARG format` |-
+|`B.ARG` |32 |- |`B.ARG NZ2DN.canon` |-
+|`B.ARG` |32 |- |`B.ARG ND2ZN.normal, FP16, Null` |-
+|`B.ARG` |32 |- |`B.ARG DN2ZN.normal, FP16, Null` |-
+|`B.ARG` |32 |- |`B.ARG DN2NZ.normal, FP32, Null` |-
+|`B.DIM` |32 |- |`B.DIM RegSrc, uimm, ->LB2` |-
+|`B.DIM` |32 |- |`B.DIM RegSrc, uimm, ->LB0` |-
+|`B.DIM` |32 |- |`B.DIM RegSrc, uimm, ->LB1` |-
+|===
+
 [[insnref-block-attribute]]
 === Block Attribute
 
@@ -95,17 +112,6 @@
 |===
 |Mnemonic |Len |Decode |Assembly |Notes
 |`B.ATTR` |32 |- |`B.ATTR {trap, atomic, <aq, rl, aqrl>, far, DataLayout.{canon, normal}, SrcType, PadValue, DR}` |-
-|===
-
-[[insnref-block-argument]]
-=== Block Argument
-
-[cols="1,1,2,4,6",options="header"]
-|===
-|Mnemonic |Len |Decode |Assembly |Notes
-|`B.DIM` |32 |- |`B.DIM RegSrc, uimm, ->LB2` |-
-|`B.DIM` |32 |- |`B.DIM RegSrc, uimm, ->LB0` |-
-|`B.DIM` |32 |- |`B.DIM RegSrc, uimm, ->LB1` |-
 |===
 
 [[insnref-branch]]
@@ -143,7 +149,7 @@
 |===
 |Mnemonic |Len |Decode |Assembly |Notes
 |`B.IOD` |32 |- |`B.IOD DepSrc0, DepSrc1, DepSrc2, ->DepDst` |-
-|`B.IOR` |32 |- |`B.IOR RegSrc0, RegSrc1, RegSrc2, ->RegDst` |-
+|`B.IOR` |32 |- |`B.IOR [RegSrc0, RegSrc1, RegSrc2],[RegDst]` |-
 |`B.IOT` |32 |- |`B.IOT [SrcTile0<.reuse>, SrcTile1<.reuse>], group=1, ->DstTile<RegSrc>` |-
 |`B.IOT` |32 |- |`B.IOT [SrcTile0<.reuse>, SrcTile1<.reuse>], group=0, ->DstTile<RegSrc>` |-
 |`B.IOTI` |32 |- |`B.IOTI [SrcTile0<.reuse>, SrcTile1<.reuse>], group=0, ->DstTile<Size>` |-
@@ -226,7 +232,7 @@
 |`BSTART.STD` |32 |- |`BSTART.STD IND` |-
 |`BSTART.STD` |32 |- |`BSTART.STD DIRECT, <label>` |-
 |`BSTART.SYS` |32 |- |`BSTART.SYS FALL<, fixup_label>` |-
-|`BSTART.TEPL` |32 |- |`BSTART.TEPL TileOp, DataType, <tile, gprs>` |-
+|`BSTART.TEPL` |32 |- |`BSTART.TEPL TileOp, DataType` |-
 |`BSTART.TMA` |32 |- |`BSTART.TMA TileOp, DataType` |-
 |`BSTART.VPAR` |32 |- |`BSTART.VPAR <VS8, VS16>` |-
 |`BSTART.VSEQ` |32 |- |`BSTART.VSEQ <VS8, VS16>` |-

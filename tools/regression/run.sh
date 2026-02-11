@@ -8,10 +8,11 @@ echo "== Linx regression =="
 echo
 echo "-- ISA golden checks"
 python3 "$ROOT/tools/isa/lint_no_cjk.py"
-python3 "$ROOT/tools/isa/build_golden.py" --in "$ROOT/isa/golden/v0.2" --out "$ROOT/isa/spec/current/linxisa-v0.2.json" --check
-python3 "$ROOT/tools/isa/validate_spec.py" --spec "$ROOT/isa/spec/current/linxisa-v0.2.json"
 python3 "$ROOT/tools/isa/build_golden.py" --profile v0.3 --check
 python3 "$ROOT/tools/isa/validate_spec.py" --profile v0.3
+python3 "$ROOT/tools/isa/build_golden.py" --profile v0.2 --check
+python3 "$ROOT/tools/isa/validate_spec.py" --profile v0.2
+python3 "$ROOT/tools/bringup/check26_contract.py" --root "$ROOT"
 LINUX_ROOT="${LINUX_ROOT:-$HOME/linux}"
 QEMU_ROOT_CHECK="${QEMU_ROOT_CHECK:-$HOME/qemu}"
 LLVM_ROOT="${LLVM_ROOT:-$HOME/llvm-project}"
@@ -21,12 +22,12 @@ LEGACY_SCAN_ARGS=()
 [[ -d "$LLVM_ROOT" ]] && LEGACY_SCAN_ARGS+=(--extra-root "$LLVM_ROOT")
 python3 "$ROOT/tools/isa/check_no_legacy_v02.py" --root "$ROOT" "${LEGACY_SCAN_ARGS[@]}"
 python3 "$ROOT/tools/isa/check_no_legacy_v03.py" --root "$ROOT" "${LEGACY_SCAN_ARGS[@]}"
-python3 "$ROOT/tools/isa/report_encoding_space.py" --spec "$ROOT/isa/spec/current/linxisa-v0.2.json" --out "$ROOT/docs/reference/encoding_space_report.md" --check
-python3 "$ROOT/tools/isa/gen_qemu_codec.py" --spec "$ROOT/isa/spec/current/linxisa-v0.2.json" --out-dir "$ROOT/isa/generated/codecs" --check
-python3 "$ROOT/tools/isa/gen_c_codec.py" --spec "$ROOT/isa/spec/current/linxisa-v0.2.json" --out-dir "$ROOT/isa/generated/codecs" --check
-python3 "$ROOT/tools/isa/gen_manual_adoc.py" --spec "$ROOT/isa/spec/current/linxisa-v0.2.json" --out-dir "$ROOT/docs/architecture/isa-manual/src/generated" --check
-python3 "$ROOT/tools/isa/gen_ssr_adoc.py" --spec "$ROOT/isa/spec/current/linxisa-v0.2.json" --out-dir "$ROOT/docs/architecture/isa-manual/src/generated" --check
-python3 "$ROOT/tools/isa/sail_coverage.py" --spec "$ROOT/isa/spec/current/linxisa-v0.2.json" --implemented "$ROOT/isa/sail/implemented_mnemonics.txt" --out "$ROOT/isa/sail/coverage.json" --check
+python3 "$ROOT/tools/isa/report_encoding_space.py" --spec "$ROOT/isa/spec/current/linxisa-v0.3.json" --out "$ROOT/docs/reference/encoding_space_report.md" --check
+python3 "$ROOT/tools/isa/gen_qemu_codec.py" --spec "$ROOT/isa/spec/current/linxisa-v0.3.json" --out-dir "$ROOT/isa/generated/codecs" --check
+python3 "$ROOT/tools/isa/gen_c_codec.py" --spec "$ROOT/isa/spec/current/linxisa-v0.3.json" --out-dir "$ROOT/isa/generated/codecs" --check
+python3 "$ROOT/tools/isa/gen_manual_adoc.py" --spec "$ROOT/isa/spec/current/linxisa-v0.3.json" --out-dir "$ROOT/docs/architecture/isa-manual/src/generated" --check
+python3 "$ROOT/tools/isa/gen_ssr_adoc.py" --spec "$ROOT/isa/spec/current/linxisa-v0.3.json" --out-dir "$ROOT/docs/architecture/isa-manual/src/generated" --check
+python3 "$ROOT/tools/isa/sail_coverage.py" --spec "$ROOT/isa/spec/current/linxisa-v0.3.json" --implemented "$ROOT/isa/sail/implemented_mnemonics.txt" --out "$ROOT/isa/sail/coverage.json" --check
 
 # Allow callers to override tool locations.
 CLANG="${CLANG:-}"

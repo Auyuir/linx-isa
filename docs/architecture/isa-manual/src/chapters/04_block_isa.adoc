@@ -7,18 +7,22 @@
 Linx uses an explicit *block split* convention for control flow. Control-flow is defined at **basic-block**
 granularity.
 
-**Safety rule:** every architectural control-flow target (direct, conditional, indirect, call/return) must point at a
-**block start marker**. Branching to an address that does not begin with a block start marker raises an exception.
+**Safety rule:** every architectural control-flow target (direct, conditional, indirect, call/return) MUST point at a
+**block start marker**. Branching to an address that does not begin with a block start marker MUST raise an exception.
+This rule is a control-flow integrity requirement. (Evidence: MAN-02)
 
 * `BSTOP` terminates a block.
-* `BSTART.*` / `C.BSTART.*` terminate the current block and begin the next one.
+* `BSTART.*` / `C.BSTART.*` terminate the current block and begin the next one. (Evidence: MAN-01)
 * A block may also be *implicitly* terminated by the next `BSTART.*` marker in the instruction stream (toolchain
   convention; some code emits an explicit `BSTOP`/`C.BSTOP` for clarity).
+* An empty block is legal (header and boundary markers only, no payload instructions).
 * Canonical v0.3 assembly uses typed `BSTART.<type>` forms only; legacy PAR-style shorthand is treated as a non-canonical
   alias in reconciliation tooling and is rejected by v0.3 drift gates.
 * Conditional transitions use a two-step sequence:
-  1. set the block condition using `SETC.*` / `C.SETC.*`
-  2. select the next block using `BSTART.* COND, <target>`
+  1. Set the block condition using `SETC.*` / `C.SETC.*`
+  2. Select the next block using `BSTART.* COND, <target>`
+
+NOTE: `FENTRY`, `FEXIT`, and `FRET.*` template blocks are also block start markers and MUST be treated as valid control-flow targets. (Evidence: MAN-03, MAN-04)
 
 [[blockisa-forms]]
 === Block forms (coupled / decoupled / template)
@@ -40,7 +44,7 @@ Rules:
 * A coupled block begins at a block start marker and ends at `BSTOP`/`C.BSTOP` or implicitly at the next block start
   marker.
 * `B.*` header descriptors MAY appear immediately after the block start marker. In coupled blocks, such descriptors
-  are typically used as tooling metadata and MAY be treated as no-ops by scalar-only implementations unless specified
+  serve as tooling metadata and MAY be treated as no-ops by scalar-only implementations unless specified
   otherwise by the platform profile.
 
 [[blockisa-forms-decoupled]]
@@ -106,6 +110,9 @@ The intended execution model is block-granular:
 * Instructions within a block may be implemented with out-of-order execution/commit as a microarchitectural choice.
 * Block-to-block behavior is architecturally sequential: the next block begins only after the current block is
   complete.
+* Implementations that issue blocks out-of-order must retire in-order with a block reorder buffer (`BROB`) and commit
+  at block boundaries.
+* A block may be interpreted as a variable length macro-instruction composed from 16/32/48/64-bit encodings.
 
 This model is the motivation for explicit block delimiters and for block-local temporaries (ClockHands) whose lifetime
 is bounded by the block.
@@ -149,12 +156,12 @@ Additional bring-up fields used by tooling and trap recovery include:
 
 The bring-up profile constrains certain combinations (examples):
 
-* `.SYS` blocks are typically fall-through only (`FALL`), optionally with a fixup label.
+* `.SYS` blocks fall through only (`FALL`), optionally with a fixup label.
 * `.MPAR` / `.MSEQ` blocks are described as fall-through forms used to select memory-parallel vs memory-sequential
   execution modes.
 * `.FP` blocks mirror `.STD` transitions but mark a floating-point execution context.
 
-Block types beyond the scalar core (e.g. `.TMA`, `.TEPL`, `.VPAR`, `.VSEQ`, `.CUBE`, `.FIXP`) appear in the catalog as
+Block types beyond the scalar core (e.g. `.TMA`, `.VPAR`, `.VSEQ`, `.CUBE`, `.FIXP`) appear in the catalog as
 Block Split forms; this manual treats their detailed execution semantics as staged in v0.3 unless explicitly specified
 in the golden sources (`isa/golden/v0.3/`).
 
@@ -163,27 +170,65 @@ in the golden sources (`isa/golden/v0.3/`).
 
 Linx defines *tile blocks* for hardware-accelerated tile operations. A tile block is a basic block that:
 
-* starts with a tile block header (e.g. `BSTART.TMA`, `BSTART.CUBE`, `BSTART.VPAR`, `BSTART.VSEQ`), and
+* starts with a typed tile/vector header (`BSTART.TMA`, `BSTART.CUBE`, `BSTART.MPAR`, `BSTART.MSEQ`,
+  `BSTART.VPAR`, `BSTART.VSEQ`), and
 * ends at `BSTOP` / `C.BSTOP` or the next block start marker.
 
 Tile blocks operate on **tile registers** (see <<progmodel-tile>>), and use explicit per-block descriptors:
 
 * `B.IOT` / `B.IOTI` describe tile inputs/outputs (including relative tile references and transfer sizing)
 * `B.IOR` describes GPR inputs/outputs for the block
+* `B.ARG` carries tile/tensor layout format selection for the block
 * `B.DIM` / `C.B.DIM*` may be used to provide block-local dimensions and valid masks via `LB0..LB2`
 
-Bring-up contract (v0.3 staged profile):
+Bring-up contract (strict v0.3 current profile):
 
-* `BSTART.TMA`, `BSTART.CUBE`, `BSTART.VPAR`, and `BSTART.VSEQ` are treated as **decoupled headers** (see
-  <<blockisa-forms-decoupled>>). Their body is selected by `B.TEXT`.
+* Typed block starts are canonical (`BSTART.TMA`, `BSTART.CUBE`, `BSTART.MPAR`, `BSTART.MSEQ`, `BSTART.VPAR`,
+  `BSTART.VSEQ`).
+* Legacy PAR-style block-start spelling is compatibility input only and MUST NOT appear in canonical outputs.
+* Compatibility opcode streams carrying legacy tile-op `163` are normalized to the corresponding typed form by profile
+  reconciliation tooling.
 * `TLOAD`/`TSTORE`/`TPREFETCH` are the staged memory-tile baseline for AI workloads.
 * `MCALL` semantics remain represented via `.MPAR`/`.MSEQ` execution modes in the staged profile.
 
 **Immutability rule (design intent):** a tile block consumes input tiles and produces a new destination tile; it does
 not mutate the input tiles in-place.
 
-NOTE: In the current bring-up model, `B.IOTI Size` is used to convey the tile transfer size (convention: `Size =
-log2(bytes)`, so `Size=12` denotes 4 KiB).
+NOTE: In the strict profile contract, `B.IOTI` prints transfer size in KiB (`->t<1KB>`, `->acc<4KB>`)
+and uses `last` to mark the terminal descriptor in a block header chain. Descriptor metadata may be carried by multiple
+`B.IOR` and `B.IOT/B.IOTI` entries in the same header; descriptors are consumed in header order.
+
+Bring-up v0.3 descriptor rules (normative for this bring-up profile):
+
+* `B.IOT` / `B.IOTI` *tile references* are printed as `t#k` / `u#k` / `m#k` / `n#k` where `k` is 1-based.
+  The encoded tile-id mapping is:
+** `t#k` → tile-id `k-1` (0..7)
+** `u#k` → tile-id `8+(k-1)` (8..15)
+** `m#k` → tile-id `16+(k-1)` (16..23)
+** `n#k` → tile-id `24+(k-1)` (24..31)
+  These tile-ids name positions within the corresponding hand’s architectural tile-register queue.
+* `B.IOTI` `SizeCode` maps to bytes as `bytes = 2^(SizeCode+4)` with strict architectural clamp to `512B..4KB`.
+* `S0V` / `S1V` semantics are *inverted*: `0` means the corresponding `SrcTile*` is present as an input; `1` means absent.
+  When a source is absent, its corresponding `SrcTile*` field is ignored and SHOULD be encoded as `0` in canonical v0.3 output.
+* `DstTile` encodes the destination *kind* and controls where the tile-producing engine allocates the output:
+** `0`: `t` hand (T queue)
+** `1`: `u` hand (U queue)
+** `2`: `m` hand (M queue)
+** `3`: `n` hand (N queue)
+** `4`: implicit accumulator (`acc`)
+* For destination kinds `t/u/m/n`, the destination tile register is allocated implicitly as a **queue push**:
+** the output becomes the new `hand#1` definition (for example `->u<16KB>` allocates a new `u#1`),
+** existing definitions in that hand shift down (`hand#1→hand#2`, `hand#2→hand#3`, …),
+** the oldest definition (`hand#8`) is evicted.
+** for `B.IOTI`, the `SizeCode` updates the newly allocated (`hand#1`) tile register’s tracked byte-size.
+* Input tile references (`t#k`/`u#k`/`m#k`/`n#k`) name a position in the corresponding **tile register queue**, where `k=1`
+  is the most recent definition and larger `k` values refer to older definitions.
+* `.reuse` is a staged hint bit carried on input operands. In this bring-up profile, it is required to disassemble and
+  re-encode deterministically, but it does not change the queue indexing rules defined above.
+* `MAMULB` / `MAMULB.ACC` use `SrcTile0/SrcTile1` as the two tile inputs; the output is the implicit accumulator (`->acc<...>`).
+* `group=1` is used as the terminal descriptor form in bring-up streams and is rendered as `last` in disassembly.
+* `B.IOR` disassembly omits zero GPR inputs/outputs and prints the input list in encoding order (`RegSrc0`, `RegSrc1`, `RegSrc2`)
+  (for example, `[s0,a6],[]`).
 
 [[blockisa-descriptors]]
 === Block header descriptors (B.* metadata)
@@ -206,6 +251,7 @@ The v0.3 staged catalog includes the following descriptor families:
   - `B.IOT` / `B.IOTI`: binds tile inputs/outputs for a block (including optional input reuse and transfer sizing).
   - `B.IOD`: binds dependency metadata (e.g. for scheduling between producer/consumer blocks).
 * **Block arguments**
+  - `B.ARG`: writes a per-block layout/format selector used by TMA tile load/store pipelines.
   - `B.DIM`: writes a block argument register (`LB0`–`LB2`) used for loop bounds, dimensions, and valid masks.
 * **Block attributes and hints**
   - `B.ATTR`: sets attributes such as trap/atomic/order/layout qualifiers for the current block.
@@ -224,14 +270,70 @@ these as metadata that does not affect scalar execution unless explicitly stated
 The v0.3 staged profile integrates only reconciled and internally consistent AI-oriented behavior:
 
 * Canonical mnemonic policy: vector canonical forms are `V.*`; legacy raw `L.*` spellings are normalization-only input.
-* Canonical block-start policy: use typed `BSTART.{TMA,CUBE,VPAR,VSEQ,...}` forms in spec/docs/tests.
+* Canonical block-start policy: use typed `BSTART.*` spellings in v0.3-facing disassembly/docs/tests.
 * `B.IOT/B.IOTI` group scheduling is defined for staged groups 0/1; unresolved `group=2` behavior is deferred.
 * `MAMULBMX*` raw material with contradictory `group=2` contracts is deferred and not part of canonical v0.3 outputs.
+* Broad fixed-pipe/TCVT raw extensions are deferred from canonical v0.3 until fully reconciled.
+
+[[blockisa-v03-pto-map]]
+=== v0.3 canonical PTO-to-TAU mapping (auto-mode profile)
+
+The canonical v0.3 auto-mode profile maps PTO tile primitives to typed TAU block headers and descriptors:
+
+* `PTO TLOAD`:
+  `BSTART.TMA(TLOAD)` + `B.DIM(LB0/LB1)` + `B.ARG` + `B.IOR*` + `B.IOT/B.IOTI`
+* `PTO TSTORE`:
+  `BSTART.TMA(TSTORE)` + `B.DIM(LB0/LB1)` + `B.ARG` + `B.IOR*` + `B.IOT/B.IOTI`
+* `PTO TMATMUL`:
+  `BSTART.CUBE(MAMULB)` (+ ACC convert/output block when needed)
+* `PTO TMATMUL_ACC`:
+  `BSTART.CUBE(MAMULB.ACC)` (+ ACC convert/output block when needed)
+
+Normative notes:
+
+* `B.ARG + B.IOR` are both required for descriptor-rich `TLOAD/TSTORE`.
+* Multiple `B.IOR` and `B.IOT/B.IOTI` descriptors in one header are legal and consumed in order.
+* Canonical v0.3 artifacts MUST NOT encode unresolved `group=2` behavior.
+
+[[blockisa-v03-bridge]]
+=== Vector memory-bridge naming (strict profile)
+
+For vector blocks, canonical bridge operands and mnemonic families are:
+
+* `load.local` / `store.local`: tile/local direction accesses.
+* `load.brg` / `store.brg`: bridged global-memory accesses.
+* `ri0..rin`: ordered vector argument namespace mapped from `B.IOR`.
+* `TA`, `TB`: vector input tile bases.
+* `TO`: vector output tile base.
+* `TS`: vector scratch tile base.
+
+Vector block bodies may mix scalar-uniform and vector instructions; scalar-uniform forms use scalar block-local queues
+(`t/u`) while vector forms use vector/tile-local namespaces.
+
+[[blockisa-bcmd]]
+=== Block-command lifecycle
+
+The architectural interface between the first and second layer is a block command:
+
+* Header descriptors (`B.ARG`, `B.ATTR`, `B.IOR`, `B.IOT`, `B.DIM`, `B.TEXT`) pack command fields.
+* `BSTOP` finalizes and dispatches the command to the selected PE.
+* The PE executes and returns live-out/status metadata.
+* `BROB` tracks command completion and retires blocks in-order.
+
+[[blockisa-tepl]]
+=== Generic accelerator block (`BSTART.TEPL`)
+
+`BSTART.TEPL` provides a generic extensible block type for implementation-defined in-core accelerators.
+
+* `BSTART.TEPL` headers use the same descriptor families (`B.ATTR`, `B.ARG`, `B.IOR`, `B.IOT`) as other decoupled
+  blocks.
+* `BSTART.TEPL` blocks must follow the same block-boundary legality rules and must not directly bypass the memory and
+  privilege contracts defined in this manual.
 
 [[blockisa-assembly]]
 === Assembly/disassembly conventions
 
-* The default block type `.STD` is typically omitted:
+* The default block type `.STD` is omitted:
   - `BSTART` means `BSTART.STD`
   - `C.BSTART` means `C.BSTART.STD`
 * For returns, a common convention is:

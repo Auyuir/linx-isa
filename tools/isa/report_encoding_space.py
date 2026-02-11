@@ -330,6 +330,21 @@ def _inst_overlap(a: InstPat, b: InstPat) -> bool:
     return all(_parts_overlap(pa, pb) for pa, pb in zip(a.parts, b.parts))
 
 
+_ALLOWED_ALIAS_OVERLAP_MNEMONICS = {
+    "BSTART.PAR",
+    "BSTART.TEPL",
+    "BSTART.MPAR",
+    "BSTART.MSEQ",
+    "BSTART.VPAR",
+    "BSTART.VSEQ",
+}
+
+
+def _is_allowed_overlap(a: InstPat, b: InstPat) -> bool:
+    mnems = {a.mnemonic, b.mnemonic}
+    return mnems.issubset(_ALLOWED_ALIAS_OVERLAP_MNEMONICS)
+
+
 def _conflicts_by_signature(insts: List[InstPat]) -> Dict[Tuple[int, ...], List[Tuple[InstPat, InstPat]]]:
     groups: Dict[Tuple[int, ...], List[InstPat]] = defaultdict(list)
     for it in insts:
@@ -342,6 +357,8 @@ def _conflicts_by_signature(insts: List[InstPat]) -> Dict[Tuple[int, ...], List[
         for i in range(len(xs)):
             for j in range(i + 1, len(xs)):
                 if _inst_overlap(xs[i], xs[j]):
+                    if _is_allowed_overlap(xs[i], xs[j]):
+                        continue
                     conf.append((xs[i], xs[j]))
         out[sig] = conf
     return out
@@ -540,7 +557,7 @@ def _write_report(
 
 def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Report encoding space usage and detect conflicts.")
-    ap.add_argument("--spec", type=Path, default=Path("isa/spec/current/linxisa-v0.2.json"))
+    ap.add_argument("--spec", type=Path, default=Path("isa/spec/current/linxisa-v0.3.json"))
     ap.add_argument("--out", type=Path, default=Path("docs/reference/encoding_space_report.md"))
     ap.add_argument(
         "--check",

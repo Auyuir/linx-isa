@@ -113,6 +113,15 @@ def _group_instructions(instructions: List[Dict[str, Any]]) -> "OrderedDict[str,
     return out
 
 
+def _filter_canonical_instructions(
+    instructions: List[Dict[str, Any]], spec_version: str
+) -> List[Dict[str, Any]]:
+    out = list(instructions)
+    if spec_version.startswith("0.3"):
+        out = [inst for inst in out if str(inst.get("mnemonic") or "").strip() != "BSTART.PAR"]
+    return out
+
+
 def _format_expr(expr: str) -> str:
     expr = _collapse_ws(expr)
     # Normalize common operators/spaces.
@@ -1162,7 +1171,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument(
         "--profile",
         choices=["v0.2", "v0.3"],
-        default="v0.2",
+        default="v0.3",
         help="ISA profile for default --spec path",
     )
     ap.add_argument("--spec", default=None, help="Path to ISA catalog JSON")
@@ -1176,14 +1185,20 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     spec_path = (
         args.spec
-        or ("isa/spec/v0.3/linxisa-v0.3.json" if args.profile == "v0.3" else "isa/spec/current/linxisa-v0.2.json")
+        or (
+            "isa/spec/current/linxisa-v0.3.json"
+            if args.profile == "v0.3"
+            else "isa/spec/current/linxisa-v0.2.json"
+        )
     )
     spec = _read_json(spec_path)
     spec_version = str(spec.get("version") or "").strip() or "?"
     golden_hint = f"isa/golden/v{spec_version}/" if spec_version != "?" else "isa/golden/v*/"
     spec_label = os.path.basename(os.path.normpath(spec_path))
     source_comment = f"// Source: {spec_label} (built from {golden_hint})"
-    instructions: List[Dict[str, Any]] = list(spec.get("instructions", []))
+    instructions: List[Dict[str, Any]] = _filter_canonical_instructions(
+        list(spec.get("instructions", [])), spec_version
+    )
     groups = _group_instructions(instructions)
 
     outputs = [

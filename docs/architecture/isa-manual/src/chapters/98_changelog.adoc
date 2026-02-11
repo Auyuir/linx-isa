@@ -3,6 +3,47 @@
 
 This section records notable changes to the LinxISA catalog and to the associated manual/tooling in this repository.
 
+[[changelog-v0-3-strict-26check-2026-02-12]]
+=== v0.3 (strict 26-check cutover) — 2026-02-12
+
+**Contract and gates**
+
+* Added strict 26-check contract artifacts:
+  - `docs/bringup/CHECK26_CONTRACT.md`
+  - `docs/bringup/check26_contract.yaml`
+  - `tools/bringup/check26_contract.py`
+* Wired 26-check gate into regression.
+
+**Current spec cutover**
+
+* Switched default compiled catalog to `isa/spec/current/linxisa-v0.3.json`.
+* Kept `isa/spec/current/linxisa-v0.2.json` as legacy reference.
+* Updated regression/codegen generator paths to use strict v0.3 current catalog by default.
+
+**Architecture alignment**
+
+* Locked strict memory-model wording to TSO in v0.3 state + manual.
+* Updated block ISA chapter for typed block-start canonical policy.
+* Added vector bridge naming contract (`load.local`/`store.local`, `load.brg`/`store.brg`, `ri*`, `TA/TB/TO/TS`).
+* Added explicit architectural wording for tile bounds (`512B..4KB`, 32 tiles, 128KB architectural cap).
+
+[[changelog-v0-3-unified-2026-02-11]]
+=== v0.3 (unified) — 2026-02-11
+
+**Manual refactoring (this release)**
+
+* Merged v0.2 and v0.3 profiles into a single v0.3 specification.
+* Replaced all CARG terminology with BARG (Block Argument Register) across the manual.
+* Added Block ISA interaction guidance to instruction groups (normative requirements).
+* Added evidence citations (MAN-01 through MAN-07) throughout for traceability.
+* Fixed style issues: removed weasel words, enforced RFC 2119 normative language.
+* Updated TODO markers to reference Linux bring-up status.
+
+**Canonical specification**
+
+* Updated preamble to reference `isa/spec/current/linxisa-v0.3.json` as the single source of truth.
+* The v0.3 profile now unifies the v0.2 bring-up baseline with v0.3 staged extensions.
+
 [[changelog-v0-3-staged-2026-02-11]]
 === v0.3 (staged) — 2026-02-11
 

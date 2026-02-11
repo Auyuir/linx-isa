@@ -3,7 +3,7 @@
 [[insnref-details]]
 === Instruction descriptions (by mnemonic)
 
-This section provides per-mnemonic descriptions. The tables above remain the authoritative listing of encodable forms and decode layouts in the v0.2 catalog. Descriptions and pseudocode here are derived from mnemonic naming conventions plus catalog assembly templates/notes and are intended to be *informative*.
+This section provides per-mnemonic descriptions. The tables above remain the authoritative listing of encodable forms and decode layouts in the v0.3 catalog. Descriptions and pseudocode here are derived from mnemonic naming conventions plus catalog assembly templates/notes and are intended to be *informative*.
 
 [[insndesc-execution-control]]
 ==== Execution Control
@@ -1089,29 +1089,31 @@ Operation (informative)::
 Execute operation as selected by the mnemonic and encoded modifiers.
 ----
 
-[[insndesc-block-attribute]]
-==== Block Attribute
+[[insndesc-block-argument]]
+==== Block Argument
 
-[[insndesc-block-attribute-b-attr]]
-===== B.ATTR
+[[insndesc-block-argument-b-arg]]
+===== B.ARG
 
-Sets block attributes (e.g., ordering/atomic qualifiers such as aq/rl) as encoded by the operands.
+Block metadata instruction (sub-operation selected by the mnemonic suffix).
 
-Catalog forms:: 1 form(s) (32 bits).
+Catalog forms:: 6 form(s) (32 bits).
 
 Assembly forms::
 +
-* `B.ATTR {trap, atomic, <aq, rl, aqrl>, far, DataLayout.{canon, normal}, SrcType, PadValue, DR}`
+* `B.ARG NORM.normal`
+* `B.ARG format`
+* `B.ARG NZ2DN.canon`
+* `B.ARG ND2ZN.normal, FP16, Null`
+* `B.ARG DN2ZN.normal, FP16, Null`
+* `B.ARG DN2NZ.normal, FP32, Null`
 
 Operation (informative)::
 +
 [source]
 ----
-SetBlockAttributes(/* fields as encoded */)
+UpdateBlockMetadata(/* fields as encoded */)
 ----
-
-[[insndesc-block-argument]]
-==== Block Argument
 
 [[insndesc-block-argument-b-dim]]
 ===== B.DIM
@@ -1131,6 +1133,27 @@ Operation (informative)::
 [source]
 ----
 LBx = Read(RegSrc) + uimm  // x selected by encoding (LB0/LB1/LB2)
+----
+
+[[insndesc-block-attribute]]
+==== Block Attribute
+
+[[insndesc-block-attribute-b-attr]]
+===== B.ATTR
+
+Sets block attributes (e.g., ordering/atomic qualifiers such as aq/rl) as encoded by the operands.
+
+Catalog forms:: 1 form(s) (32 bits).
+
+Assembly forms::
++
+* `B.ATTR {trap, atomic, <aq, rl, aqrl>, far, DataLayout.{canon, normal}, SrcType, PadValue, DR}`
+
+Operation (informative)::
++
+[source]
+----
+SetBlockAttributes(/* fields as encoded */)
 ----
 
 [[insndesc-branch]]
@@ -1376,7 +1399,7 @@ Catalog forms:: 1 form(s) (32 bits).
 
 Assembly forms::
 +
-* `B.IOR RegSrc0, RegSrc1, RegSrc2, ->RegDst`
+* `B.IOR [RegSrc0, RegSrc1, RegSrc2],[RegDst]`
 
 Operation (informative)::
 +
@@ -2059,7 +2082,7 @@ Catalog forms:: 1 form(s) (32 bits).
 
 Assembly forms::
 +
-* `BSTART.TEPL TileOp, DataType, <tile, gprs>`
+* `BSTART.TEPL TileOp, DataType`
 
 Operation (informative)::
 +

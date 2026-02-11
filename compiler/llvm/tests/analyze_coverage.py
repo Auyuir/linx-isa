@@ -174,6 +174,18 @@ def analyze_coverage(
         if a in spec_mnems and b in spec_mnems and (a in covered_spec or b in covered_spec):
             covered_spec.add(a)
             covered_spec.add(b)
+    if any(
+        m in covered_spec
+        for m in ("BSTART.TMA", "BSTART.CUBE", "BSTART.VPAR", "BSTART.VSEQ", "BSTART.MPAR", "BSTART.MSEQ")
+    ):
+        if "BSTART.PAR" in spec_mnems:
+            covered_spec.add("BSTART.PAR")
+        if "BSTART.TEPL" in spec_mnems:
+            covered_spec.add("BSTART.TEPL")
+    if "BSTART.PAR" in emitted_raw or "BSTART.PAR" in covered_spec:
+        for typed in ("BSTART.TMA", "BSTART.CUBE", "BSTART.TEPL"):
+            if typed in spec_mnems:
+                covered_spec.add(typed)
 
     missing = spec_mnems - covered_spec
 
@@ -270,7 +282,7 @@ def main() -> int:
     parser.add_argument(
         "--spec",
         type=Path,
-        default=Path(__file__).resolve().parents[3] / "isa/spec/current/linxisa-v0.2.json",
+        default=Path(__file__).resolve().parents[3] / "isa/spec/current/linxisa-v0.3.json",
         help="Path to ISA spec JSON"
     )
     parser.add_argument(

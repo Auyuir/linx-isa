@@ -8,7 +8,17 @@
 #include "linx_test.h"
 
 #define __LINX_TAU__ 1
+#include <pto/linx/AutoModeKernels.hpp>
 #include <pto/linx/TileOps.hpp>
+
+extern "C" void pto_tload_store_i32(const int *src, int *dst);
+extern "C" void pto_mamulb_i32_8x8(const int *lhs, const int *rhs, int *dst);
+extern "C" void pto_tmatmul_acc_i32_8x8(const int *lhs, const int *rhs, int *acc_dst);
+extern "C" void pto_gemm_auto_i32(const int *lhs, const int *rhs, int *dst);
+extern "C" void pto_flash_attention_auto_i32(const int *query, const int *key, const int *value, int *dst);
+
+static constexpr unsigned kTileElemsI32 = pto::linx::auto_mode::kTileElemsI32;
+static constexpr unsigned kTileSizeCode = pto::linx::auto_mode::kFullTileSizeCode;
 
 static void tile_matmul_ref_i32_8x8(int32_t out[64], const int32_t a[64], const int32_t b[64])
 {
@@ -23,10 +33,50 @@ static void tile_matmul_ref_i32_8x8(int32_t out[64], const int32_t a[64], const 
     }
 }
 
-extern "C" void run_tile_tests(void)
+static int32_t *tile_ptr(int32_t *buffer, unsigned tile_idx)
 {
-    test_suite_begin(0x0000000A);
+    return buffer + tile_idx * kTileElemsI32;
+}
 
+static const int32_t *tile_ptr(const int32_t *buffer, unsigned tile_idx)
+{
+    return buffer + tile_idx * kTileElemsI32;
+}
+
+static void init_tile_pattern(int32_t *tile, int32_t seed)
+{
+    for (unsigned i = 0; i < kTileElemsI32; i++) {
+        tile[i] = 0;
+    }
+    for (unsigned i = 0; i < 64; i++) {
+        int32_t lane = (int32_t)(i % 13u) - 6;
+        int32_t col = (int32_t)(i & 7u) - 3;
+        tile[i] = lane * seed + col;
+    }
+}
+
+static int64_t checksum_tiles_i32(const int32_t *tiles, unsigned tile_count)
+{
+    int64_t checksum = 0;
+    for (unsigned tile = 0; tile < tile_count; tile++) {
+        const int32_t *base = tile_ptr(tiles, tile);
+        for (unsigned i = 0; i < 64; i++) {
+            checksum += (int64_t)base[i];
+        }
+    }
+    return checksum;
+}
+
+static void print_checksum(const char *label, int64_t value)
+{
+    uart_puts(label);
+    uart_puts("0x");
+    uart_puthex64((uint64_t)value);
+    uart_puts("\r\n");
+}
+
+static void run_base_tile_tests()
+{
     test_start(0x000A0001);
     uart_puts("PTO tile matmul (8x8 i32) ... ");
 
@@ -50,10 +100,10 @@ extern "C" void run_tile_tests(void)
 
     // Tiles are SSA values; LLVM register allocation assigns them to the
     // architectural tile register file (32 tiles: 4 hands × depth 8).
-    auto tA = pto::linx::tload<0>(A);          // 4 KiB
-    auto tB = pto::linx::tload<0>(B);          // 4 KiB
+    auto tA = pto::linx::tload<kTileSizeCode>(A);          // 4 KiB
+    auto tB = pto::linx::tload<kTileSizeCode>(B);          // 4 KiB
     auto tC = pto::linx::mamulb<8, 8, 8>(tA, tB); // 8x8 i32
-    pto::linx::tstore<0>(C, tC);               // 4 KiB
+    pto::linx::tstore<kTileSizeCode>(C, tC);             // 4 KiB
 
     tile_matmul_ref_i32_8x8(EXP, A, B);
     for (unsigned i = 0; i < 64; i++) {
@@ -72,8 +122,8 @@ extern "C" void run_tile_tests(void)
         DST[i] = 0;
     }
 
-    auto tRT = pto::linx::tload<0>(SRC);
-    pto::linx::tstore<0>(DST, tRT);
+    auto tRT = pto::linx::tload<kTileSizeCode>(SRC);
+    pto::linx::tstore<kTileSizeCode>(DST, tRT);
 
     for (unsigned i = 0; i < 128; i++) {
         TEST_EQ32((uint32_t)DST[i], (uint32_t)SRC[i], 0x000A2000u + i);
@@ -89,13 +139,255 @@ extern "C" void run_tile_tests(void)
         C_ACC[i] = 0;
     }
 
-    auto tAcc = pto::linx::tload<0>(C_ACC);
-    auto tOut = pto::linx::tmatmul_acc<8, 8, 8>(tAcc, tA, tB);
-    pto::linx::tstore<0>(C_ACC, tOut);
+    auto tA_acc = pto::linx::tload<kTileSizeCode>(A);
+    auto tB_acc = pto::linx::tload<kTileSizeCode>(B);
+
+    // v0.3 bring-up: the implicit accumulator is seeded by a preceding MAMULB.
+    // The ACC operand of tmatmul_acc is currently a SSA dependency carrier.
+    auto tSeed = pto::linx::mamulb<8, 8, 8>(tA_acc, tB_acc);
+    auto tOut = pto::linx::tmatmul_acc<8, 8, 8>(tSeed, tA_acc, tB_acc);
+    pto::linx::tstore<kTileSizeCode>(C_ACC, tOut);
 
     for (unsigned i = 0; i < 64; i++) {
-        TEST_EQ32((uint32_t)C_ACC[i], (uint32_t)EXP[i], 0x000A3000u + i);
+        const int32_t expected = (int32_t)((int64_t)EXP[i] * 2);
+        TEST_EQ32((uint32_t)C_ACC[i], (uint32_t)expected, 0x000A3000u + i);
     }
 
     test_pass();
+}
+
+static void run_auto_mode_gemm_test()
+{
+    test_start(0x000A0004);
+    uart_puts("Auto-mode GEMM kernel ... ");
+
+    alignas(16) static int32_t GEMM_A[9 * kTileElemsI32];
+    alignas(16) static int32_t GEMM_B[8 * kTileElemsI32];
+    alignas(16) static int32_t GEMM_OUT[11 * kTileElemsI32];
+    alignas(16) static int32_t GEMM_REF0[64];
+
+    for (unsigned tile = 0; tile < 9; tile++) {
+        init_tile_pattern(tile_ptr(GEMM_A, tile), (int32_t)(3 + tile));
+    }
+    for (unsigned tile = 0; tile < 8; tile++) {
+        init_tile_pattern(tile_ptr(GEMM_B, tile), (int32_t)(11 + tile));
+    }
+    for (unsigned i = 0; i < 11 * kTileElemsI32; i++) {
+        GEMM_OUT[i] = 0;
+    }
+
+    pto::linx::auto_mode::gemm_kernel_i32(GEMM_A, GEMM_B, GEMM_OUT);
+
+    const unsigned gemm_lhs_map[11] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 0, 1};
+    const unsigned gemm_rhs_map[11] = {0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 7};
+    for (unsigned tile = 0; tile < 11; tile++) {
+        tile_matmul_ref_i32_8x8(
+            GEMM_REF0,
+            tile_ptr(GEMM_A, gemm_lhs_map[tile]),
+            tile_ptr(GEMM_B, gemm_rhs_map[tile]));
+        const int32_t *out_tile = tile_ptr(GEMM_OUT, tile);
+        for (unsigned i = 0; i < 64; i++) {
+            TEST_EQ32((uint32_t)out_tile[i], (uint32_t)GEMM_REF0[i], 0x000A4000u + tile * 64u + i);
+        }
+    }
+
+    print_checksum("QEMU_GEMM_CHECKSUM=", checksum_tiles_i32(GEMM_OUT, 11));
+    test_pass();
+}
+
+static void run_auto_mode_flash_test()
+{
+    test_start(0x000A0005);
+    uart_puts("Auto-mode flash-attention kernel ... ");
+
+    alignas(16) static int32_t FLASH_Q[5 * kTileElemsI32];
+    alignas(16) static int32_t FLASH_K[5 * kTileElemsI32];
+    alignas(16) static int32_t FLASH_V[4 * kTileElemsI32];
+    alignas(16) static int32_t FLASH_OUT[9 * kTileElemsI32];
+    alignas(16) static int32_t FLASH_REF_SCORE[64];
+    alignas(16) static int32_t FLASH_REF_OUT[64];
+
+    for (unsigned tile = 0; tile < 5; tile++) {
+        init_tile_pattern(tile_ptr(FLASH_Q, tile), (int32_t)(17 + tile));
+        init_tile_pattern(tile_ptr(FLASH_K, tile), (int32_t)(29 + tile));
+    }
+    for (unsigned tile = 0; tile < 4; tile++) {
+        init_tile_pattern(tile_ptr(FLASH_V, tile), (int32_t)(41 + tile));
+    }
+    for (unsigned i = 0; i < 9 * kTileElemsI32; i++) {
+        FLASH_OUT[i] = 0;
+    }
+
+    pto::linx::auto_mode::flash_attention_kernel_i32(FLASH_Q, FLASH_K, FLASH_V, FLASH_OUT);
+
+    const unsigned score_q_map[9] = {0, 1, 2, 3, 4, 0, 1, 2, 3};
+    const unsigned score_k_map[9] = {0, 1, 2, 3, 4, 1, 2, 3, 4};
+    const unsigned score_v_map[9] = {0, 1, 2, 3, 0, 1, 2, 3, 0};
+    for (unsigned tile = 0; tile < 9; tile++) {
+        tile_matmul_ref_i32_8x8(
+            FLASH_REF_SCORE,
+            tile_ptr(FLASH_Q, score_q_map[tile]),
+            tile_ptr(FLASH_K, score_k_map[tile]));
+        tile_matmul_ref_i32_8x8(
+            FLASH_REF_OUT,
+            FLASH_REF_SCORE,
+            tile_ptr(FLASH_V, score_v_map[tile]));
+        const int32_t *out_tile = tile_ptr(FLASH_OUT, tile);
+        for (unsigned i = 0; i < 64; i++) {
+            TEST_EQ32((uint32_t)out_tile[i], (uint32_t)FLASH_REF_OUT[i], 0x000A5000u + tile * 64u + i);
+        }
+    }
+
+    print_checksum("QEMU_FLASH_CHECKSUM=", checksum_tiles_i32(FLASH_OUT, 9));
+    test_pass();
+}
+
+static void run_pto_example_kernel_tests()
+{
+    test_start(0x000A0006);
+    uart_puts("PTO example tload/tstore ... ");
+
+    alignas(16) static int32_t EX_SRC[1024];
+    alignas(16) static int32_t EX_DST[1024];
+    for (unsigned i = 0; i < 1024; i++) {
+        EX_SRC[i] = (int32_t)((int)i * 5 - 19);
+        EX_DST[i] = 0;
+    }
+
+    pto_tload_store_i32(EX_SRC, EX_DST);
+    for (unsigned i = 0; i < 256; i++) {
+        TEST_EQ32((uint32_t)EX_DST[i], (uint32_t)EX_SRC[i], 0x000A6000u + i);
+    }
+    test_pass();
+
+    test_start(0x000A0007);
+    uart_puts("PTO example mamulb ... ");
+
+    alignas(16) static int32_t EX_MA[1024];
+    alignas(16) static int32_t EX_MB[1024];
+    alignas(16) static int32_t EX_MC[1024];
+    alignas(16) static int32_t EX_MC_REF[64];
+    init_tile_pattern(EX_MA, 7);
+    init_tile_pattern(EX_MB, 13);
+    for (unsigned i = 0; i < 1024; i++) {
+        EX_MC[i] = 0;
+    }
+
+    pto_mamulb_i32_8x8(EX_MA, EX_MB, EX_MC);
+    tile_matmul_ref_i32_8x8(EX_MC_REF, EX_MA, EX_MB);
+    for (unsigned i = 0; i < 64; i++) {
+        TEST_EQ32((uint32_t)EX_MC[i], (uint32_t)EX_MC_REF[i], 0x000A7000u + i);
+    }
+    test_pass();
+
+    test_start(0x000A0008);
+    uart_puts("PTO example tmatmul_acc ... ");
+
+    alignas(16) static int32_t EX_AA[1024];
+    alignas(16) static int32_t EX_AB[1024];
+    alignas(16) static int32_t EX_ACC[1024];
+    alignas(16) static int32_t EX_ACC_MUL[64];
+    init_tile_pattern(EX_AA, 5);
+    init_tile_pattern(EX_AB, 9);
+    for (unsigned i = 0; i < 1024; i++) {
+        EX_ACC[i] = 0;
+    }
+    for (unsigned i = 0; i < 64; i++) {
+        EX_ACC[i] = (int32_t)((int)i - 17);
+    }
+
+    pto_tmatmul_acc_i32_8x8(EX_AA, EX_AB, EX_ACC);
+    tile_matmul_ref_i32_8x8(EX_ACC_MUL, EX_AA, EX_AB);
+    for (unsigned i = 0; i < 64; i++) {
+        const int32_t expected = (int32_t)((int64_t)EX_ACC_MUL[i] * 2);
+        TEST_EQ32((uint32_t)EX_ACC[i], (uint32_t)expected, 0x000A8000u + i);
+    }
+    test_pass();
+
+    test_start(0x000A0009);
+    uart_puts("PTO example gemm_auto ... ");
+
+    alignas(16) static int32_t EX_GEMM_A[9 * kTileElemsI32];
+    alignas(16) static int32_t EX_GEMM_B[8 * kTileElemsI32];
+    alignas(16) static int32_t EX_GEMM_OUT[11 * kTileElemsI32];
+    alignas(16) static int32_t EX_GEMM_REF[64];
+
+    for (unsigned tile = 0; tile < 9; tile++) {
+        init_tile_pattern(tile_ptr(EX_GEMM_A, tile), (int32_t)(3 + tile));
+    }
+    for (unsigned tile = 0; tile < 8; tile++) {
+        init_tile_pattern(tile_ptr(EX_GEMM_B, tile), (int32_t)(11 + tile));
+    }
+    for (unsigned i = 0; i < 11 * kTileElemsI32; i++) {
+        EX_GEMM_OUT[i] = 0;
+    }
+
+    pto_gemm_auto_i32(EX_GEMM_A, EX_GEMM_B, EX_GEMM_OUT);
+
+    const unsigned gemm_lhs_map[11] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 0, 1};
+    const unsigned gemm_rhs_map[11] = {0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 7};
+    for (unsigned tile = 0; tile < 11; tile++) {
+        tile_matmul_ref_i32_8x8(
+            EX_GEMM_REF,
+            tile_ptr(EX_GEMM_A, gemm_lhs_map[tile]),
+            tile_ptr(EX_GEMM_B, gemm_rhs_map[tile]));
+        const int32_t *out_tile = tile_ptr(EX_GEMM_OUT, tile);
+        for (unsigned i = 0; i < 64; i++) {
+            TEST_EQ32((uint32_t)out_tile[i], (uint32_t)EX_GEMM_REF[i], 0x000A9000u + tile * 64u + i);
+        }
+    }
+    print_checksum("QEMU_GEMM_EXAMPLE_CHECKSUM=", checksum_tiles_i32(EX_GEMM_OUT, 11));
+    test_pass();
+
+    test_start(0x000A000A);
+    uart_puts("PTO example flash_auto ... ");
+
+    alignas(16) static int32_t EX_FLASH_Q[5 * kTileElemsI32];
+    alignas(16) static int32_t EX_FLASH_K[5 * kTileElemsI32];
+    alignas(16) static int32_t EX_FLASH_V[4 * kTileElemsI32];
+    alignas(16) static int32_t EX_FLASH_OUT[9 * kTileElemsI32];
+    alignas(16) static int32_t EX_FLASH_SCORE[64];
+    alignas(16) static int32_t EX_FLASH_REF[64];
+
+    for (unsigned tile = 0; tile < 5; tile++) {
+        init_tile_pattern(tile_ptr(EX_FLASH_Q, tile), (int32_t)(17 + tile));
+        init_tile_pattern(tile_ptr(EX_FLASH_K, tile), (int32_t)(29 + tile));
+    }
+    for (unsigned tile = 0; tile < 4; tile++) {
+        init_tile_pattern(tile_ptr(EX_FLASH_V, tile), (int32_t)(41 + tile));
+    }
+    for (unsigned i = 0; i < 9 * kTileElemsI32; i++) {
+        EX_FLASH_OUT[i] = 0;
+    }
+
+    pto_flash_attention_auto_i32(EX_FLASH_Q, EX_FLASH_K, EX_FLASH_V, EX_FLASH_OUT);
+
+    const unsigned score_q_map[9] = {0, 1, 2, 3, 4, 0, 1, 2, 3};
+    const unsigned score_k_map[9] = {0, 1, 2, 3, 4, 1, 2, 3, 4};
+    const unsigned score_v_map[9] = {0, 1, 2, 3, 0, 1, 2, 3, 0};
+    for (unsigned tile = 0; tile < 9; tile++) {
+        tile_matmul_ref_i32_8x8(
+            EX_FLASH_SCORE,
+            tile_ptr(EX_FLASH_Q, score_q_map[tile]),
+            tile_ptr(EX_FLASH_K, score_k_map[tile]));
+        tile_matmul_ref_i32_8x8(
+            EX_FLASH_REF,
+            EX_FLASH_SCORE,
+            tile_ptr(EX_FLASH_V, score_v_map[tile]));
+        const int32_t *out_tile = tile_ptr(EX_FLASH_OUT, tile);
+        for (unsigned i = 0; i < 64; i++) {
+            TEST_EQ32((uint32_t)out_tile[i], (uint32_t)EX_FLASH_REF[i], 0x000AA000u + tile * 64u + i);
+        }
+    }
+    print_checksum("QEMU_FLASH_EXAMPLE_CHECKSUM=", checksum_tiles_i32(EX_FLASH_OUT, 9));
+    test_pass();
+}
+
+extern "C" void run_tile_tests(void)
+{
+    test_suite_begin(0x0000000A);
+    run_base_tile_tests();
+    run_auto_mode_gemm_test();
+    run_auto_mode_flash_test();
+    run_pto_example_kernel_tests();
 }

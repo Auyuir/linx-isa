@@ -1,10 +1,10 @@
 [[system]]
-== System and privileged architecture (v0.2 bring-up profile)
+== System and privileged architecture (v0.3)
 
-This chapter defines the v0.2 bring-up privileged architecture: Access Control Rings (ACR), privileged system registers
+This chapter defines the v0.3 privileged architecture: Access Control Rings (ACR), privileged system registers
 (SSR), and the trap envelope for exceptions and interrupts.
 
-Where a profile/platform must supply additional detail for portability, this chapter marks it as a **normative TODO**.
+Where platform-specific details are required, the chapter notes this with [PLATFORM] markers. See Linux bring-up status for implementation progress.
 
 [[system-acr]]
 === Access Control Rings (ACR)
@@ -12,20 +12,20 @@ Where a profile/platform must supply additional detail for portability, this cha
 Linx partitions privileged state using **Access Control Rings** (**ACR**). The architecture defines up to **16**
 rings, named **ACR0..ACR15**.
 
-Bring-up conventions (v0.2):
+Bring-up conventions (v0.3):
 
 * On reset, an LXCPU starts executing in **ACR0**.
-* **ACR0 is the root / most privileged** ring. Rings with larger numeric IDs are typically used for progressively less
-  privileged software roles, but the set of implemented rings is profile-defined.
+* **ACR0 is the root / most privileged** ring. Rings with larger numeric IDs MAY be used for progressively less
+  privileged software roles; the set of implemented rings is profile-defined.
 * Every LXCPU executes at exactly one active ACR at a time (recorded in `CSTATE.ACR`).
 * Some privileged SSRs are **ACR-scoped** (banked per ring). In this manual those registers are written with an
   `*_ACRn` suffix.
 
-Typical software role mapping (informative, v0.2):
+Informative software role mapping (v0.3):
 
 [%header,cols="1,4"]
 |===
-|ACR |Typical role
+|ACR |Role
 
 |`ACR0` |Root management privilege (firmware / bring-up monitor / initialization).
 |`ACR1` |Main system privilege (host OS or hypervisor).
@@ -180,11 +180,11 @@ Assembly syntax:
 Valid `request_type` encodings (bring-up):
 
 * When executed in **ACR1**:
-  - `SCT_MAC(0)`: machine request (typically routed to BIOS/firmware services).
-  - `SCT_SEC(2)`: security request (typically routed to security services).
+  - `SCT_MAC(0)`: machine request ( routed to BIOS/firmware services).
+  - `SCT_SEC(2)`: security request ( routed to security services).
 * When executed in **ACR2**:
   - `SCT_MAC(0)`: machine request.
-  - `SCT_SYS(1)`: system call (typically a user-to-OS request).
+  - `SCT_SYS(1)`: system call (a user-to-OS request).
   - `SCT_SEC(2)`: security request.
 * In other ACRs, all `request_type` values are invalid.
 
@@ -475,11 +475,17 @@ timer programming uses `TIMER_TIME_ACRn` / `TIMER_TIMECMP_ACRn` (see <<ssr-acr-s
 profile-defined.
 
 [[system-todos]]
-=== Normative TODOs (privileged architecture)
+=== Platform-Specific Requirements (privileged architecture)
 
-The following items must be specified by the privileged architecture/profile for software portability:
+The following items require platform-specific or profile-specific definition for software portability:
 
 * Interrupt definitions (Xproxy sources, IDs, priorities, and target ring routing).
 * Exception/interrupt vectoring rules beyond `EVBASE` (offsets, priorities, nesting).
 * Precise state rules on trap entry for each block type (what is committed/rolled back, and EBSTATE storage formats).
 * System-call block calling convention details and cross-ring return/repair rules.
+
+[NOTE]
+====
+These items are actively being defined as part of the LinxISA v0.3 privileged architecture development.
+See the Linux bring-up status (`~/linux/Documentation/linxisa/bringup-status.md`) for implementation progress.
+====

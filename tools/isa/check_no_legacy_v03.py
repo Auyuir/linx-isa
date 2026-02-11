@@ -3,7 +3,7 @@
 Fail when legacy aliases leak into canonical v0.3 artifacts.
 
 The v0.3 staged profile requires:
-  - typed block starts (no BSTART.PAR)
+  - canonical typed block starts (`BSTART.<type>`)
   - canonical vector mnemonic family (no L.* / l.*)
   - no legacy `.kill` tile-operand notation in canonical docs/spec/tests
 """
@@ -95,6 +95,13 @@ def _should_skip(path: Path) -> bool:
         return True
     if "/llvm/lib/Target/LinxISA/AsmParser/" in p and path.name == "LinxISAAsmParser.cpp":
         return True
+    if "/llvm/lib/Target/LinxISA/MCTargetDesc/" in p and path.name == "linxisa_opcodes.c":
+        # Compatibility aliases are retained in generated opcode catalogs.
+        return True
+    if "/isa/golden/v0.3/opcodes/" in p:
+        # v0.3 keeps compatibility aliases in opcode sources; canonical-output
+        # checks run on docs/spec/tests and generated outputs.
+        return True
     return False
 
 
@@ -160,11 +167,6 @@ def main() -> int:
 
     checks: List[Tuple[str, Pattern[str], List[Path]]] = [
         (
-            "legacy block-start alias",
-            re.compile(r"\bBSTART\.PAR\b"),
-            [],
-        ),
-        (
             "legacy vector mnemonic family",
             re.compile(r"\b[Ll]\.[A-Za-z0-9_.]+\b"),
             [
@@ -182,6 +184,17 @@ def main() -> int:
             "legacy trap-save SSR name",
             re.compile(r"\b(EBPC|ETPC|EBPCN)\b"),
             [],
+        ),
+        (
+            "non-canonical PAR block-start spelling",
+            re.compile(r"\bBSTART\.PAR\b"),
+            [
+                root / "tools" / "isa" / "reconcile_v03_raw.py",
+                root / "tools" / "isa" / "normalize_v03_example_asm.py",
+                root / "tools" / "isa" / "check_no_legacy_v03.py",
+                root / "isa" / "spec" / "v0.3" / "linxisa-v0.3.json",
+                root / "isa" / "spec" / "current" / "linxisa-v0.3.json",
+            ],
         ),
     ]
 
