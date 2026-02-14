@@ -98,15 +98,21 @@ echo "-- QEMU runtime tests"
 echo
 echo "-- TSVC benchmark suite on QEMU (optional)"
 if [[ "${RUN_TSVC:-0}" == "1" ]]; then
-  python3 "$ROOT/workloads/benchmarks/run_tsvc.py" \
-    --clang "$CLANG" \
-    --lld "$LLD" \
-    --qemu "$QEMU" \
-    --timeout "${TSVC_TIMEOUT:-180}" \
-    --iterations "${TSVC_ITERATIONS:-32}" \
-    --len-1d "${TSVC_LEN_1D:-320}" \
-    --len-2d "${TSVC_LEN_2D:-16}" \
-    --vector-mode "${TSVC_VECTOR_MODE:-mseq}"
+  TSVC_ARGS=(
+    --clang "$CLANG"
+    --lld "$LLD"
+    --qemu "$QEMU"
+    --timeout "${TSVC_TIMEOUT:-180}"
+    --iterations "${TSVC_ITERATIONS:-32}"
+    --len-1d "${TSVC_LEN_1D:-320}"
+    --len-2d "${TSVC_LEN_2D:-16}"
+    --vector-mode "${TSVC_VECTOR_MODE:-all}"
+    --coverage-fail-under "${TSVC_COVERAGE_FAIL_UNDER:-151}"
+  )
+  if [[ "${TSVC_NO_COVERAGE_GATE:-0}" == "1" ]]; then
+    TSVC_ARGS+=(--no-coverage-gate)
+  fi
+  python3 "$ROOT/workloads/benchmarks/run_tsvc.py" "${TSVC_ARGS[@]}"
 else
   echo "note: skipping TSVC (set RUN_TSVC=1 to enable)"
 fi

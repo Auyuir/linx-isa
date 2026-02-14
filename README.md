@@ -1,68 +1,43 @@
-# linxisa
-
 <p align="center">
-  <img src="docs/architecture/isa-manual/src/images/linxisa-logo.svg" alt="LinxISA logo (灵犀)" width="180" />
+  <img src="docs/architecture/isa-manual/src/images/linxisa-logo.svg" alt="LinxISA logo" width="200" />
 </p>
 
-LinxISA is a new instruction-set architecture (ISA) in the spirit of RISC-style ISAs, with a repository layout intended
-to keep **specification**, **software**, and **hardware** implementations consistent.
+<h1 align="center">Linx Instruction Set Architecture</h1>
 
-## Naming
+<p align="center"><strong>LinxISA</strong> is a specification-first ISA project with aligned software and hardware implementations.</p>
 
-- Official ISA name: **LinxISA** (Linx Instruction Set Architecture)
+## Overview
+
+LinxISA is a RISC-style instruction-set architecture developed with a single-source specification workflow. This
+repository keeps the ISA definition, compiler/backend artifacts, emulator work, and RTL bring-up assets in one place to
+reduce spec/implementation drift.
+
+## Naming and Targets
+
+- Official ISA name: **Linx Instruction Set Architecture (LinxISA)**
 - Short name: **Linx**
-- LLVM/MC arch names: `linx32`, `linx64`
+- LLVM/MC architecture names: `linx32`, `linx64`
 
-## Branding
+## Canonical Specification
 
-- Official logo asset (SVG): `docs/architecture/isa-manual/src/images/linxisa-logo.svg`
-- Design intent: preserve the original **灵犀**-inspired silhouette and add subtle semiconductor-style detailing (routed traces, pads/vias) for technical ISA branding.
+The ISA source of truth is under `isa/`:
 
-## Source of truth
+- Authoritative golden sources: `isa/golden/v0.3/**`
+- Current compiled catalog: `isa/spec/current/linxisa-v0.3.json`
+- Legacy catalogs (reference only): `isa/spec/current/linxisa-v0.2.json`, `isa/spec/current/linxisa-v0.1.json`
 
-The ISA definition is centralized under `isa/`:
-- Golden sources (authoritative, current): `isa/golden/v0.3/**`
-- Compiled, machine-readable catalog (checked in, current): `isa/spec/current/linxisa-v0.3.json`
-- Legacy catalogs (kept for reference): `isa/spec/current/linxisa-v0.2.json`, `isa/spec/current/linxisa-v0.1.json`
+All tools and implementations in this repository should consume the compiled catalog to keep encoding and behavior
+consistent.
 
-All implementations in this repo (compiler, emulator, C++ models, RTL) should reference the formal catalog to avoid
-decode/encode drift.
+## Quick Start
 
-## ISA manual (PDF)
-
-A draft ISA manual (AsciiDoc → PDF) lives in:
-
-- `docs/architecture/isa-manual/`
-
-Build:
-
-```bash
-cd docs/architecture/isa-manual
-make pdf
-```
-
-## Bring-up plan and progress
-
-Canonical bring-up hierarchy and progress tracking live in:
-
-- `docs/bringup/README.md`
-- `docs/bringup/PROGRESS.md`
-
-Current execution roadmap:
-
-1. `docs/bringup/phases/04_rtl.md` (agile pyCircuit RTL/model loop)
-2. `docs/bringup/phases/05_fpga_zybo_z7.md` (ZYBO Z7-20 platform bring-up)
-3. `docs/bringup/phases/06_linux_on_janus.md` (Linux to BusyBox shell on Janus)
-
-## Regression
-
-Run the repo's end-to-end regression (compiler compile-only tests + coverage + QEMU runtime tests):
+Run end-to-end regression:
 
 ```bash
 bash tools/regression/run.sh
 ```
 
-Override tool locations as needed:
+Optional tool overrides:
 
 ```bash
 export CLANG=~/llvm-project/build-linxisa-clang/bin/clang
@@ -71,19 +46,35 @@ export QEMU=~/qemu/build-tci/qemu-system-linx64
 bash tools/regression/run.sh
 ```
 
-## Repository layout (initial)
+## Documentation
 
-- `isa/`: ISA specification and generated catalogs
-- `tools/isa/`: spec extraction/validation tools
-- `compiler/`: compiler/backend work (planned)
-- `toolchain/`: assembler/linker/runtime tooling (planned)
-- `emulator/`: reference emulator (planned)
-- `models/`: C++ core models / reference models (planned)
-- `rtl/`: RTL implementation (planned)
-- `docs/`: design notes and development docs (architecture, bring-up, reference, project)
-- `tests/`: QEMU runtime tests and scratch tests
-- `workloads/`: benchmarks, examples, and generated codegen/runtime reports
+- ISA manual (AsciiDoc/PDF): `docs/architecture/isa-manual/`
+- Bring-up planning and status: `docs/bringup/README.md`, `docs/bringup/PROGRESS.md`
+- Architecture and project docs: `docs/architecture/`, `docs/project/`, `docs/reference/`
 
-## Target flow
+Build the ISA manual PDF:
 
-1. C source → 2. compiler → 3. LinxISA encoding/spec → 4. emulator → 5. RTL (simulation/FPGA/ASIC)
+```bash
+cd docs/architecture/isa-manual
+make pdf
+```
+
+## Repository Structure
+
+- `isa/`: ISA golden sources, generated codecs, compiled catalogs
+- `tools/isa/`: ISA extraction, generation, and validation tooling
+- `compiler/`: compiler and backend integration assets
+- `toolchain/`: assembler/linker/libc and related toolchain pieces
+- `emulator/`: emulator integration and patches
+- `models/`: reference/modeling assets
+- `rtl/`: hardware RTL implementation
+- `tests/`: runtime and integration tests
+- `workloads/`: benchmarks and workload harnesses
+- `docs/`: architecture, bring-up, reference, and project documentation
+
+## Development Flow
+
+1. Author or update ISA definitions in `isa/`
+2. Regenerate/validate machine-readable artifacts
+3. Align compiler, emulator, and RTL behavior to the catalog
+4. Run regression and targeted tests

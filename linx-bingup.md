@@ -11,7 +11,6 @@ Global States, GSTATE, 1st layer, shared by all processing units PEs
     - 24 GPRs (R0-R23)
     - 32 Tile Registers
     - SSR (system status registers)
-
 Check 3:
 Local Block State called BSTATE, 2nd layer, different type of blocks have different states
     - Scalar Block States (life cycles only within one basic block)
@@ -22,7 +21,7 @@ Local Block State called BSTATE, 2nd layer, different type of blocks have differ
             - current bpc
             - next bpc
             - setc conditional flags
-    - Vector Block States
+    - Vector Block States 
         - T hand (4 depth, 64bit)
         - U hand (4 depth, 64bit)
         - VT hand (4 depth, each lane is 32bit, variable lane count)
@@ -33,9 +32,7 @@ Local Block State called BSTATE, 2nd layer, different type of blocks have differ
         - Internal states for local FSMs so it can be restarted at the state
 
 Check 4:
-ESAVE and ERCOV are template blocks that save/restore the 2nd layer (BSTATE) to/from the 1st layer (GSTATE). 2nd layer is a union structure.
-
-**Note:** The implementation uses "ERCOV" (Extended Recover), not "ERET" as originally documented.
+ESAVE, and ERET are template blocks that save different 2nd layer to the 1st layer. 2nd layer is a union structure.
 
 Check 5:
 The whole LinxCPU is naturally designed as hierachical architectural states in the first day.
@@ -49,15 +46,15 @@ For linxisa, all the computations are organized into blocks. There is no instruc
 
 The program order sequentially executes the blocks with different types.
 
-BlockA -> BlockB -> BlockC
+BlockA -> BlockB -> BlockC 
 
 Check 7:
 Control flow is performed after the commit of the current block. Inside each block, it computes or predict the next block address and put it in BARG.NextBPC. During the commit of the block, the next bpc will become visible and set to the global PC.
 
 Check 8:
-All control flows MUST jump to a block boundary instruction (BSTART, BSTOP with different kind).
-If the control flow jump in the middle of the block. And exception is generated (Illegal control flow).
-Note that this feature is for safety purposes. LinxISA design this feature for *control flow integrety*.
+All control flows MUST jump to a block boundary instruction (BSTART, BSTOP with different kind). 
+If the control flow jump in the middle of the block. And exception is generated (Illegal control flow). 
+Note that this feature is for safety purposes. LinxISA design this feature for *control flow integrety*. 
 A block assumes fall through if there is no branch target set internally.
 
 Check 9:
@@ -76,9 +73,10 @@ There are instructions that give additional information for the block structure,
     - B.ATTR attributes normally control the barriers between the block
     - B.IOR (block input and output registers) acts like a sensitivity list that specifies the live-in and live-out for the block. Only takes effect for decoupled blocks and template blocks. The input and output are absolute GPR ids.
     - B.IOT (block input and output tile registers) specifies the tile register input and output for the block. It is different because it uses relative register encoding in SSA form. B.IOT [T#k, M#j] -> U. Tile output register for each block never overides its input tile register.
-    - B.IOD (deprecated) used for dummy dependence between block instructions.
+    - B.IOD (currently absolete) used for dummy dependence between block instructions. 
 
 Check 11:
+
 Scalar blocks, Termplate blocks, Tile blocks orgnize in a sequential way.
 
 LinxCPU will execute blocks out-of-order or in-order depending on the implementation. But the block commit must commit in order. LinxCPU will use *block reorder buffer* to control the retirement of the block despite different type of blocks.
@@ -101,20 +99,20 @@ BSTOP
 
 The global inputs are [a0, a1, a2], the private inputs are forward within T, U relative registers. There is a store instruciton also serve as the output of the block.
 
-You can think it as a fused instruction
+You can think it as a fused instruction 
 ```
 sw zero, [(a0+a1)-a2,100]
 ```
 Note that all register T, U, queues must have one producer and one consumer (to serve as a internal forward behaviour)
 
-LinxISA add this restrictions to make the hardware much easier for maintaining the speculative states. We are telling the LinxCPU those are temporary results that are definately giving forward behaviour. So that the microarch can free the ptag resource earlier.
+LinxISA add this restrictions to make the hardware much easier for maintaining the speculative states. We are telling the LinxCPU those are temporary results that are definately giving forward behaviour. So that the microarch can free the ptag resource earlier. 
 
 Guide for compilers, all block internal states should use T/U hand as mush as possible.
 
 Check 13:
 Coupled and decoupled blocks
 
-Coupled blocks embed microinstructions into BSTART and BSTOP form. Those micro-instructions are executed in the first layer.
+Coupled blocks embed microinstructions into BSTART and BSTOP form. Those micro-instructions are executed in the first layer. 
 Decoupled blocks split the header and block in different PCs. The header is executed in the first layer, the body is executed in the second layer.
 
 - B.TEXT is only visible in decoupled blocks. B.TEXT is assigned with an offset to its body.
@@ -131,7 +129,7 @@ body_label:
     bstop
 
 Check 14:
-B.TEXT decides whether the block has a separate body. Template blocks do have a block body but the micro-architecture might generate the body for it.
+B.TEXT decides whether the block has a separate body. Template blocks do have a block body but the micro-architecture might generate the body for it. 
 
 Template blocks are implementation defined.
 
@@ -165,10 +163,12 @@ to provide generic interface with in-core accelerator PEs. Note that this PE Mus
 
 In the future, we will provide a list of accelerated blocks.
 
-Check 16:
+Check 15:
+
 Floating point instructions. LinxISA do not have dedicated FP architectural state for FP. All the integer and fp use the same layer 1 arch state. Change block type to BSTART.FP if there exist FP instructions. BSTART.FP allow normal scalar instructions interleave with FP. BSTART.FP only serve as a hint.
 
-Check 17:
+Check 16:
+
 Vector instructions. LinxISA choses to use different vector instruction design compared to AVX, SVE. It is a SIMT-style instruction set with hardware loop design.
 
 For loops like this
@@ -198,7 +198,9 @@ bstop
 - Vector block body only specify one lane of compute, repeated by Block DIM
 - Vector blocks unroll the loop and commit loop iterations in order
 
-Check 18:
+
+# Check 17
+
 BSTART.MPAR : parallel execution of block in parallel
 
 The semantics like this
@@ -213,32 +215,35 @@ The difference of PAR and VEC is the execution model
 PAR: execute block body in parallel (parallel commits for all lanes)
 SEQ: execute block body in vector mode (parallel in VLEN, but sequential between VLEN)
 
-Check 19:
+# Check 18
+
 BSTART.VPAR : parallel execution of vector without touching memory, it only accesses tile register
-BSTART.VSEQ : sequential execution of vector without touching meory, it only accesses tile register
+BSTART.VSEQ : sequential execution of vector without touching meory, it only accesses tile register 
 
-Please note that we suggest the usage of VPAR and VSEQ.
+Please note that we suggest the usage of VPAR and VSEQ. 
 
-Tile registers are not memory accesses. Different vector blocks can be executed out of order.
+Tile registers are not memory accesses. Different vector blocks can be executed out of order. 
 This is a significant source of performance improvement.
 
 VPAR and VSEQ can be executed speculatively.
 
-Check 20:
+# Check 19
+
 Tile registers are special concept defined in Linx ISA.
 
 - 32 tile registers as architectural state
 - Tile registers are variable in sizes. But they have a minimum size of 512B, and maximum size of 4KB.
-- Architectural states are 32x4KB = 128KB
+- Architectural states are 32x4KB = 128KB 
 - Architectural states all record tile size for tile registers as architectural states
 - LinxCPU implementation will squeeze the bubbles and allocate tile registers in different places.
 - Tile registers can be renamed. There are more physical tile registers than architectural tile registers.
 - Tile registers are referenced relatively.
 
-Check 21:
+# Check 20
+
 For compiler writers, tile register allocation and vector register is a very difficult task because it uses Clockhands. Scalar block do not have the problem because there is no internal control flow for scalar blocks. So T que and U que do not need to consider control flow. But for tile and vector use and def are obfusecated with control flow. We need to make sure at each dynamic path, the relative distance of two tile registers are in the same distance. You need to check the clockhand paper online.
 
-Check 22:
+# Check 21
 You need to understand the general structure of the LinxCPU. The interface between the first layer and second layer is called block command. Normally LinxCPU preposes the following:
 - BSTART.XXX pack the opcode, bid, and info into block command
 - B.IOR: read the input register data when the input are ready, pack them into block command. Reserve a ptag for output registers.
@@ -249,7 +254,7 @@ You need to understand the general structure of the LinxCPU. The interface betwe
 - B.TEXT: calculate the pc and pack the pc into block command
 - BSTOP: check all field are ready and then kick off the block command to the second layer (PE execution)
 
-Check 23:
+# Check 22:
 You need to understand the general structure of the LinxCPU. The second layer PE is only active whenever it receives a valid block command. The PE first receives  and buffer the block command. Parse the command into detailed operations.
 
 - Vector PE: retrive the input data, block dim repeat value, execution mode, get the pc and jump to the pc.
@@ -268,23 +273,26 @@ Some command might be flushed due to mispredication and speculations.
 
 Note: a PE might execute multiple block command at a time.
 
-Check 24:
+# Check 23:
 The Vector PE do not have direct access to main memory. Only scalar pipe and TMA has access. (scalar load, scalar store, TLOAD, TSTORE). They are issued out of order but the memory access is in order.
 
 Note that, LinxISA memory model is **TSO**. Store values should not be reordered despite their address might differ.
 
-Check 25:
+# Check 24:
+
 Scalar load/store, Tile load/store must always go to the same TLB and MMU. Tile load/store are ranged access so they might need multiple lookup. Page fault might happen at tile load/store. We should treat tile load/store as restartable. OS kernels must prepare all TLOAD, TSTORE pages before resuming back to execution.
 
-Check 26:
+# Check 25:
+
 BSTART.MSEQ, BSTART.MPAR rely on the vector core to perform memory access. But the vector core do not have direct access to memory. So whenever the vector core locates the global memory. It has to do the following:
 1. Write the global DDR address to tile register and notify TMA
 2. TMA read from the tile register, get the DDR address, and perform load
 3. Load data return back to tile register, and notify vector core
-4. Vector core read from the tile resgiter and get the value.
+4. Vector core read from the tile resgiter and get the value.      
 
 There are memory barriers between MSEQ, MPAR to avoid potential memory conflicts.
 
+# Check 26:
 For vector blocks:
 1. You must encode load/store for tile direction as `load.local` and `store.local` for example `lw.local [ri0, vt#1] -> vt` There is 1 bit in the encoding.
 2. You must label global load/store as `load.brg` and `store.brg` to do the bridged access.
