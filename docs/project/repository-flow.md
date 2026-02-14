@@ -1,6 +1,21 @@
 # LinxISA Repository Flow (v0.3)
 
-The repository is organized around a spec-first flow where all implementations consume the same v0.3 catalog.
+The repository is organized around a spec-first flow where implementations consume the same v0.3 catalog.
+
+## Workspace Bootstrap
+
+Before working on bring-up, initialize dependency submodules:
+
+```bash
+git submodule sync --recursive
+git submodule update --init --recursive
+```
+
+Pinned dependency repos live under `extern/`:
+
+- `extern/qemu`
+- `extern/linux`
+- `extern/pyCircuit`
 
 ## Flow
 
@@ -8,4 +23,5 @@ The repository is organized around a spec-first flow where all implementations c
 2. Compiled catalog in `spec/isa/spec/current/linxisa-v0.3.json`
 3. Generated decode assets in `spec/isa/generated/codecs/`
 4. Compiler/emulator/RTL integration under `impl/`
-5. Validation through `tools/regression/run.sh` and `tools/bringup/check26_contract.py`
+5. Cross-repo bring-up integration through `extern/*`
+6. Validation through `tools/regression/run.sh` and `tools/bringup/check26_contract.py`

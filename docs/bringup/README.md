@@ -2,6 +2,10 @@
 
 This directory tracks v0.3 architecture/implementation alignment and public bring-up checkpoints.
 
+## Start Here
+
+- Onboarding and workspace setup: `docs/bringup/GETTING_STARTED.md`
+
 ## Normative Contract
 
 - Architecture contract: `docs/architecture/v0.3-architecture-contract.md`
