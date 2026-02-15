@@ -503,22 +503,41 @@ float __floatsisf(i32 a) {
     return *(float*)&result;
 }
 
-/* Double precision wrappers */
+/* Forward declarations for explicit soft-fp cast helpers. */
+float __truncdfsf2(double a);
+double __extendsfdf2(float a);
+
+/* Double precision wrappers.
+ *
+ * Keep the wrappers expressed in terms of explicit helper calls so the Linx
+ * backend does not lower C casts through hardware FCVT instructions.
+ */
 double __adddf3(double a, double b) {
-    /* Simplified - just convert to float and back for now */
-    return (double)__addsf3((float)a, (float)b);
+    float af = __truncdfsf2(a);
+    float bf = __truncdfsf2(b);
+    float rf = __addsf3(af, bf);
+    return __extendsfdf2(rf);
 }
 
 double __subdf3(double a, double b) {
-    return (double)__subsf3((float)a, (float)b);
+    float af = __truncdfsf2(a);
+    float bf = __truncdfsf2(b);
+    float rf = __subsf3(af, bf);
+    return __extendsfdf2(rf);
 }
 
 double __muldf3(double a, double b) {
-    return (double)__mulsf3((float)a, (float)b);
+    float af = __truncdfsf2(a);
+    float bf = __truncdfsf2(b);
+    float rf = __mulsf3(af, bf);
+    return __extendsfdf2(rf);
 }
 
 double __divdf3(double a, double b) {
-    return (double)__divsf3((float)a, (float)b);
+    float af = __truncdfsf2(a);
+    float bf = __truncdfsf2(b);
+    float rf = __divsf3(af, bf);
+    return __extendsfdf2(rf);
 }
 
 /* Double/float conversions used by soft-float wrappers.

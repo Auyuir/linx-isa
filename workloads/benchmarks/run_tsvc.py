@@ -190,15 +190,18 @@ def _build_runtime_objects(
     include_dirs = [BENCH_DIR, COMPAT_DIR]
     cflags_extra: list[str] = []
 
-    def compile_runtime(src: Path, obj_name: str) -> Path:
+    def compile_runtime(src: Path, obj_name: str, *, extra_cflags: list[str] | None = None) -> Path:
         obj = rt_dir / obj_name
+        runtime_cflags = list(cflags_extra)
+        if extra_cflags:
+            runtime_cflags.extend(extra_cflags)
         _cc(
             clang=clang,
             target=target,
             src=src,
             obj=obj,
             include_dirs=include_dirs,
-            cflags_extra=cflags_extra,
+            cflags_extra=runtime_cflags,
             verbose=verbose,
         )
         return obj
@@ -211,6 +214,15 @@ def _build_runtime_objects(
     objs.append(compile_runtime(LIBC_SRC / "string" / "mem.c", "mem.o"))
     objs.append(compile_runtime(LIBC_SRC / "string" / "str.c", "str.o"))
     objs.append(compile_runtime(LIBC_SRC / "math" / "math.c", "math.o"))
+    # Keep the soft-fp runtime unoptimized during bring-up: the LinxISA backend
+    # does not yet cover all bit-twiddling patterns robustly at -O2.
+    objs.append(
+        compile_runtime(
+            LIBC_SRC / "softfp" / "softfp.c",
+            "softfp.o",
+            extra_cflags=["-O0"],
+        )
+    )
     objs.append(compile_runtime(COMPAT_DIR / "linx_compat.c", "linx_compat.o"))
     return objs
 

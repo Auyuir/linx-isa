@@ -996,7 +996,8 @@ def _write_instruction_reference(groups: "OrderedDict[str, List[Dict[str, Any]]]
 
 
 def _write_instruction_details(
-    groups: "OrderedDict[str, List[Dict[str, Any]]]", out_path: str, spec_version: str
+    groups: "OrderedDict[str, List[Dict[str, Any]]]", out_path: str, spec_version: str,
+    svg_dir: Optional[str] = None
 ) -> None:
     lines: List[str] = []
     lines.append("// Generated file; do not edit by hand.")
@@ -1085,6 +1086,18 @@ def _write_instruction_details(
                 lines.append("+")
                 for a in asm_forms:
                     lines.append(f"* `{_escape_table_cell(a)}`")
+
+            # Embed encoding SVG if available
+            if svg_dir:
+                svg_filename = f"enc_{mnemonic.lower()}.svg"
+                svg_path = os.path.join(svg_dir, svg_filename)
+                if os.path.exists(svg_path):
+                    rel_path = os.path.join("encodings", svg_filename)
+                    lines.append("")
+                    lines.append("Encoding::")
+                    lines.append("+")
+                    lines.append(f"image::{rel_path}[{mnemonic} encoding diagram,align=\"center\"]")
+                    lines.append("")
 
             if notes:
                 lines.append("")
@@ -1180,6 +1193,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         default="docs/architecture/isa-manual/src/generated",
         help="Output directory for generated .adoc fragments",
     )
+    ap.add_argument(
+        "--svg-dir",
+        default="docs/architecture/isa-manual/src/generated/encodings",
+        help="Directory containing SVG encoding diagrams",
+    )
     ap.add_argument("--check", action="store_true", help="Fail if outputs are not up-to-date")
     args = ap.parse_args(argv)
 
@@ -1202,18 +1220,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         "instruction_details.adoc",
     ]
 
-    def _emit(out_dir: str) -> None:
+    def _emit(out_dir: str, svg_dir: str) -> None:
         _mkdirp(out_dir)
         _write_registers_reg5(spec, os.path.join(out_dir, "registers_reg5.adoc"), source_comment)
         _write_instruction_group_summary(groups, os.path.join(out_dir, "instruction_group_summary.adoc"))
         _write_instruction_reference(groups, os.path.join(out_dir, "instruction_reference.adoc"))
         _write_mnemonic_index(instructions, os.path.join(out_dir, "mnemonic_index.adoc"), spec_version)
-        _write_instruction_details(groups, os.path.join(out_dir, "instruction_details.adoc"), spec_version)
+        _write_instruction_details(groups, os.path.join(out_dir, "instruction_details.adoc"), spec_version, svg_dir)
 
     if args.check:
         out_dir = args.out_dir
         with tempfile.TemporaryDirectory() as td:
-            _emit(td)
+            _emit(td, args.svg_dir)
             for name in outputs:
                 want_p = os.path.join(out_dir, name)
                 got_p = os.path.join(td, name)
@@ -1226,7 +1244,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("OK")
         return 0
 
-    _emit(args.out_dir)
+    _emit(args.out_dir, args.svg_dir)
 
     return 0
 

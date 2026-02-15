@@ -238,7 +238,8 @@ def main(argv: list[str]) -> int:
     for suite in selected:
         for rel in EXTRA_SOURCES_BY_SUITE.get(suite, []):
             sources.append(REPO_ROOT / rel)
-    if "float" in selected:
+    softfp_suites = {"float", "v03_vector", "v03_vector_ops"}
+    if any(s in softfp_suites for s in selected):
         sources.append(REPO_ROOT / "toolchain" / "libc" / "src" / "softfp" / "softfp.c")
 
     suite_macros: list[str] = []
