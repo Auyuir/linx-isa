@@ -8,14 +8,14 @@ Canonical libc sources:
 ## Repositories and pins
 
 - `lib/glibc` @ `b87a5e30608a7e00aadef9eee035a32ee0611dbf`
-- `lib/musl` @ `e1d149303fa91eedcc2beeeb1544502ec7c7b4b3`
+- `lib/musl` @ `98326e72750f9a48eff469f70fcd7e2cf947ef40`
 
 ## Current policy
 
 - Bring-up deltas live in fork history (`LinxISA/glibc`, `LinxISA/musl`).
 - This repository provides orchestration, runtime smoke, and status tracking.
 
-## Latest verified state (2026-02-15)
+## Latest verified state (2026-02-16)
 
 - glibc `G1`: blocked (`working alias attribute support required` in current Linx clang flow).
 - musl `M1`: pass (`configure` accepts `linx64-unknown-linux-musl`).
@@ -25,6 +25,10 @@ Canonical libc sources:
   - blocker report: `out/libc/musl/logs/phase-b-m3-blockers.md`
 - musl sample compile/link `R1`: pass via `avs/qemu/run_musl_smoke.py`.
 - musl runtime `R2`: pass (`MUSL_SMOKE_START` and `MUSL_SMOKE_PASS` observed).
+- Linux no-libc initramfs baselines: pass.
+  - `python3 /Users/zhoubot/linux/tools/linxisa/initramfs/smoke.py`
+  - `python3 /Users/zhoubot/linux/tools/linxisa/initramfs/full_boot.py`
+  - note: `sigill_test`/`sigsegv_test` currently use bring-up fallback markers while Linux signal-return paths are stabilized.
 
 ## Baseline artifacts
 

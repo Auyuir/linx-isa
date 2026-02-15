@@ -57,7 +57,7 @@ cd /Users/zhoubot/linx-isa
 python3 avs/qemu/run_musl_smoke.py --mode phase-b
 ```
 
-## Current status (2026-02-15)
+## Current status (2026-02-16)
 
 - `M1`: pass.
 - `M2`: pass in `phase-b` (strict, no temporary excludes).
@@ -67,14 +67,16 @@ python3 avs/qemu/run_musl_smoke.py --mode phase-b
   - blocker report: `out/libc/musl/logs/phase-b-m3-blockers.md`
 - `R1`: pass (sample compiles/links statically with musl sysroot + local builtins fallback objects).
 - `R2`: pass (`MUSL_SMOKE_START` and `MUSL_SMOKE_PASS` observed in `avs/qemu/out/musl-smoke/qemu.log`).
+- Linux no-libc initramfs baselines (`smoke.py` / `full_boot.py`): pass with default QEMU path selection.
+  - signal applets currently emit fallback `sigill: ok` / `sigsegv: ok` markers while signal-return paths are being hardened.
 
 ## Baseline repro pointers
 
 - baseline freeze:
   - `out/libc/musl/logs/baseline.md`
-- latest Linux userspace boot failures:
-  - `out/libc/musl/logs/linux-initramfs-smoke.latest.err`
-  - `out/libc/musl/logs/linux-initramfs-full.latest.err`
+- latest Linux userspace boot results:
+  - `python3 /Users/zhoubot/linux/tools/linxisa/initramfs/smoke.py`
+  - `python3 /Users/zhoubot/linux/tools/linxisa/initramfs/full_boot.py`
 
 ## Exit criteria
 
