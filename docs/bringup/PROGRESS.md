@@ -26,13 +26,17 @@ Last updated: 2026-02-16
 | Linux initramfs smoke/full | ✅ | `python3 /Users/zhoubot/linux/tools/linxisa/initramfs/smoke.py`; `python3 /Users/zhoubot/linux/tools/linxisa/initramfs/full_boot.py` |
 | musl `M1` | ✅ | `MODE=phase-b /Users/zhoubot/linx-isa/lib/musl/tools/linx/build_linx64_musl.sh` |
 | musl `M2` | ✅ (phase-b strict) | `out/libc/musl/logs/phase-b-summary.txt` |
-| musl `M3` | ⚠ blocked (PIC relocations; secondary unresolved runtime symbols) | `out/libc/musl/logs/phase-b-m3-shared.log`; `out/libc/musl/logs/phase-b-m3-shared-notext-probe.log`; `out/libc/musl/logs/phase-b-m3-blockers.md` |
+| musl `M3` | ✅ (phase-b strict) | `out/libc/musl/logs/phase-b-summary.txt`; `out/libc/musl/logs/phase-b-m3-shared.log` |
 | musl runtime `R1` | ✅ | `avs/qemu/out/musl-smoke/compile.log` |
 | musl runtime `R2` | ✅ | `avs/qemu/out/musl-smoke/qemu.log` |
 
 ## Latest command log
 
-- `MODE=phase-b /Users/zhoubot/linx-isa/lib/musl/tools/linx/build_linx64_musl.sh` ✅ (`M1/M2` pass, `M3` blocked with classified primary/secondary blockers)
+- `MODE=phase-b /Users/zhoubot/linx-isa/lib/musl/tools/linx/build_linx64_musl.sh` ✅ (`M1/M2/M3` pass)
 - `python3 /Users/zhoubot/linx-isa/avs/qemu/run_musl_smoke.py --mode phase-b` ✅ (`runtime_pass`)
 - `python3 /Users/zhoubot/linux/tools/linxisa/initramfs/smoke.py` ✅
 - `python3 /Users/zhoubot/linux/tools/linxisa/initramfs/full_boot.py` ✅
+
+## Canonical Gate Table
+
+- `docs/bringup/GATE_STATUS.md` is the source-of-truth table for latest verified commands/results across library, compiler, and kernel gates.

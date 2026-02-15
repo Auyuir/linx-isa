@@ -16,5 +16,6 @@ This directory tracks v0.3 architecture/implementation alignment and public brin
 
 - `docs/bringup/CHECK26_CONTRACT.md`
 - `docs/bringup/PROGRESS.md`
+- `docs/bringup/GATE_STATUS.md`
 - `docs/bringup/phases/`
 - `docs/bringup/contracts/`

@@ -101,7 +101,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--qemu", default=str(_default_qemu()))
     parser.add_argument("--target", default="linx64-unknown-linux-musl")
     parser.add_argument("--image-base", default="0x40000000")
-    parser.add_argument("--mode", choices=["phase-a", "phase-b"], default="phase-a")
+    parser.add_argument("--mode", choices=["phase-a", "phase-b"], default="phase-b")
     parser.add_argument("--timeout", type=int, default=90)
     parser.add_argument(
         "--out-dir",
@@ -191,18 +191,12 @@ def main(argv: list[str]) -> int:
     add_stage("musl-build", "pass", f"m1={mode_summary.get('m1', 'unknown')} m2={mode_summary.get('m2', 'unknown')} m3={mode_summary.get('m3', 'unknown')}", str(build_log))
 
     sysroot = REPO_ROOT / "out" / "libc" / "musl" / "install" / args.mode
+    runtime_lib = REPO_ROOT / "out" / "libc" / "musl" / "runtime" / args.mode / "liblinx_builtin_rt.a"
     sample_src = SCRIPT_DIR / "tests" / "linux_musl_malloc_printf.c"
     sample_bin = out_dir / "musl_smoke"
-    runtime_obj_dir = out_dir / "runtime-obj"
-    runtime_obj_dir.mkdir(parents=True, exist_ok=True)
     compile_log = out_dir / "compile.log"
 
-    sample_obj = runtime_obj_dir / "linux_musl_malloc_printf.o"
-    softfp_src = REPO_ROOT / "avs" / "runtime" / "freestanding" / "src" / "softfp" / "softfp.c"
-    softfp_obj = runtime_obj_dir / "softfp.o"
-    atomic_src = REPO_ROOT / "avs" / "runtime" / "freestanding" / "src" / "atomic" / "atomic_builtins.c"
-    atomic_obj = runtime_obj_dir / "atomic_builtins.o"
-    runtime_inc = REPO_ROOT / "avs" / "runtime" / "freestanding" / "include"
+    sample_obj = out_dir / "linux_musl_malloc_printf.o"
 
     compile_sample_cmd = [
         str(clang),
@@ -214,38 +208,6 @@ def main(argv: list[str]) -> int:
         str(sample_src),
         "-o",
         str(sample_obj),
-    ]
-    compile_softfp_cmd = [
-        str(clang),
-        "-target",
-        args.target,
-        "--sysroot",
-        str(sysroot),
-        "-ffreestanding",
-        "-fno-builtin",
-        "-O2",
-        "-I",
-        str(runtime_inc),
-        "-c",
-        str(softfp_src),
-        "-o",
-        str(softfp_obj),
-    ]
-    compile_atomic_cmd = [
-        str(clang),
-        "-target",
-        args.target,
-        "--sysroot",
-        str(sysroot),
-        "-ffreestanding",
-        "-fno-builtin",
-        "-O2",
-        "-I",
-        str(runtime_inc),
-        "-c",
-        str(atomic_src),
-        "-o",
-        str(atomic_obj),
     ]
     link_cmd = [
         str(clang),
@@ -259,8 +221,7 @@ def main(argv: list[str]) -> int:
         str(sysroot / "lib" / "crt1.o"),
         str(sysroot / "lib" / "crti.o"),
         str(sample_obj),
-        str(softfp_obj),
-        str(atomic_obj),
+        str(runtime_lib),
         str(sysroot / "lib" / "libc.a"),
         str(sysroot / "lib" / "crtn.o"),
         f"-Wl,--image-base={args.image_base}",
@@ -269,9 +230,14 @@ def main(argv: list[str]) -> int:
     ]
     env_compile = os.environ.copy()
     env_compile["PATH"] = f"{lld.parent}:{env_compile.get('PATH', '')}"
+    if not runtime_lib.exists():
+        add_stage("sample-compile", "fail", f"missing runtime builtins archive: {runtime_lib}")
+        summary["result"] = {"ok": False, "classification": "runtime_builtins_missing"}
+        _write_summary(summary_path, summary)
+        return 2
     with compile_log.open("w", encoding="utf-8") as fp:
         rc = 0
-        for cmd in [compile_sample_cmd, compile_softfp_cmd, compile_atomic_cmd, link_cmd]:
+        for cmd in [compile_sample_cmd, link_cmd]:
             fp.write("+ " + shlex.join(cmd) + "\n")
             rc = subprocess.run(
                 cmd,

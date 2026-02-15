@@ -34,12 +34,12 @@ Bring up a reproducible Linx musl path for:
 
 ## Modes
 
-- `phase-a`:
-  - allows temporary TU exclusions in `arch/linx64/arch.mak`
-  - records active excludes and crash signature in `out/libc/musl/logs/phase-a-exclusions.md`
 - `phase-b`:
   - strict mode (`LINX_MUSL_MODE=phase-b`)
   - no temporary excludes allowed
+- `phase-a`:
+  - optional compatibility mode for temporary exclusions via `LINX_MUSL_EXTRA_EXCLUDES`
+  - records active excludes and crash signature in `out/libc/musl/logs/phase-a-exclusions.md`
 
 ## Commands
 
@@ -61,11 +61,9 @@ python3 avs/qemu/run_musl_smoke.py --mode phase-b
 
 - `M1`: pass.
 - `M2`: pass in `phase-b` (strict, no temporary excludes).
-- `M3`: attempted; currently blocked by shared-link PIC relocation policy.
-  - primary blocker: `R_LINX_32` / `R_LINX_HL_PCR29_{LOAD,STORE}` in shared link.
-  - secondary `-z notext` probe reveals unresolved runtime symbols (`__add*`, `__sub*`, `__mul*`, `__div*`, `setjmp/longjmp`, `__syscall_cp_*`).
-  - blocker report: `out/libc/musl/logs/phase-b-m3-blockers.md`
-- `R1`: pass (sample compiles/links statically with musl sysroot + local builtins fallback objects).
+- `M3`: pass in `phase-b` (shared `lib/libc.so` produced).
+- `arch/linx64` atomics: `a_cas`/`a_cas_p` now use a `swapw`-backed process-global lock (non-atomic load/store CAS removed).
+- `R1`: pass (sample compiles/links statically with musl sysroot, no extra harness fallback objects).
 - `R2`: pass (`MUSL_SMOKE_START` and `MUSL_SMOKE_PASS` observed in `avs/qemu/out/musl-smoke/qemu.log`).
 - Linux no-libc initramfs baselines (`smoke.py` / `full_boot.py`): pass with default QEMU path selection.
   - signal applets currently emit fallback `sigill: ok` / `sigsegv: ok` markers while signal-return paths are being hardened.
@@ -81,7 +79,7 @@ python3 avs/qemu/run_musl_smoke.py --mode phase-b
 ## Exit criteria
 
 - `M1/M2` pass in strict mode (`phase-b`) with no temporary excludes.
-- `M3` either passes or has bounded blocker with owner + repro.
+- `M3` passes in `phase-b` (`out/libc/musl/logs/phase-b-summary.txt` shows `m3=pass`).
 - runtime sentinels are observed under QEMU:
   - `MUSL_SMOKE_START`
   - `MUSL_SMOKE_PASS`

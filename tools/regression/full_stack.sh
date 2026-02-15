@@ -72,6 +72,12 @@ if [[ "${RUN_MUSL_SMOKE:-0}" == "1" ]]; then
   python3 "$ROOT/avs/qemu/run_musl_smoke.py" --mode "$RUN_MUSL_SMOKE_MODE"
 fi
 
+if [[ "${RUN_STRICT_CROSS_REPO:-0}" == "1" ]]; then
+  echo
+  echo "-- Strict cross-repo release gate"
+  bash "$ROOT/tools/regression/strict_cross_repo.sh"
+fi
+
 PYC_ROOT="${PYC_ROOT:-$ROOT/tools/pyCircuit}"
 if [[ -d "$PYC_ROOT" ]]; then
   echo

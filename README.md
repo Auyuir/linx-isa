@@ -49,6 +49,7 @@ git submodule update --init --recursive
 - AVS compile suites: `avs/compiler/linx-llvm/tests/run.sh`
 - Main regression gate: `tools/regression/run.sh`
 - Full-stack regression: `tools/regression/full_stack.sh`
+- Strict cross-repo gate: `tools/regression/strict_cross_repo.sh`
 
 ## Repository Layout
 
@@ -67,3 +68,4 @@ git submodule update --init --recursive
 - Canonical navigation guide: `docs/project/navigation.md`
 - Agent routing policy: `AGENTS.md`
 - Migration map for this layout: `docs/migration/path-map-v0.4.0.md`
+- Bring-up gate truth table: `docs/bringup/GATE_STATUS.md`
