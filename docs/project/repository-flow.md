@@ -21,9 +21,9 @@ Pinned ecosystem repos:
 
 ## Flow
 
-1. ISA definition in `spec/isa/golden/v0.3/`
-2. Compiled catalog in `spec/isa/spec/current/linxisa-v0.3.json`
-3. Generated decode assets in `spec/isa/generated/codecs/`
+1. ISA definition in `isa/v0.3/`
+2. Compiled catalog in `isa/v0.3/linxisa-v0.3.json`
+3. Generated decode assets in `isa/generated/codecs/`
 4. Validation in AVS (`avs/`)
 5. Cross-repo alignment through submodule pinning
 6. Regression gating with `tools/regression/run.sh`

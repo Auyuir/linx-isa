@@ -37,8 +37,8 @@ The gate enforces:
 
 Pattern scanning is restricted to the strict v0.3 source-of-truth artifacts:
 
-- `./spec/isa/golden/v0.3/opcodes/lx_32.opc`
-- `./spec/isa/golden/v0.3/state/memory_model.json`
+- `./isa/v0.3/opcodes/lx_32.opc`
+- `./isa/v0.3/state/memory_model.json`
 - `./docs/architecture/isa-manual/src/chapters/02_programming_model.adoc`
 - `./docs/architecture/isa-manual/src/chapters/04_block_isa.adoc`
 - `./docs/architecture/isa-manual/src/chapters/08_memory_operations.adoc`

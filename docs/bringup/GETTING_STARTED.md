@@ -76,7 +76,8 @@ git commit -m "chore(submodules): bump ecosystem revisions"
 
 - AVS runtime tests: `avs/qemu/`
 - AVS compile tests: `avs/compiler/linx-llvm/tests/`
-- Freestanding libc support used by AVS: `tools/libc/freestanding/`
+- Freestanding libc support used by AVS: `avs/runtime/freestanding/`
+- Linux libc source forks: `lib/glibc/`, `lib/musl/`
 - Assembly sample pack: `docs/reference/examples/v0.3/`
 
 ## 6. Coordination References

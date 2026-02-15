@@ -43,12 +43,11 @@ SKIP_BASENAMES = {
 
 def _local_targets(root: Path) -> List[Path]:
     return [
-        root / "isa" / "spec" / "current" / "linxisa-v0.3.json",
-        root / "isa" / "golden" / "v0.2",
+        root / "isa" / "v0.3" / "linxisa-v0.3.json",
         root / "isa" / "generated" / "codecs",
         root / "docs" / "architecture" / "isa-manual" / "src",
         root / "docs" / "bringup",
-        root / "tests",
+        root / "avs",
         root / "tools",
     ]
 
@@ -158,16 +157,7 @@ def main() -> int:
         (
             "legacy trap-save SSR name",
             re.compile(r"\\b(EBPC|ETPC|EBPCN)\\b"),
-            [
-                # Allow mention only in the changelog chapter.
-                root
-                / "docs"
-                / "architecture"
-                / "isa-manual"
-                / "src"
-                / "chapters"
-                / "98_changelog.adoc"
-            ],
+            [],
         ),
         (
             "legacy TRAPNO E/BI description",
@@ -184,13 +174,6 @@ def main() -> int:
             re.compile(r"\\bv0\\.1\\b", re.IGNORECASE),
             [
                 # Historical/reasoning references that intentionally mention v0.1.
-                root
-                / "docs"
-                / "architecture"
-                / "isa-manual"
-                / "src"
-                / "chapters"
-                / "98_changelog.adoc",
                 root / "docs" / "bringup" / "contracts" / "linxisa_v0_2_profile_lock.md",
                 root / "tools" / "isa" / "README.md",
                 root / "tools" / "isa" / "check_no_legacy_v02.py",

@@ -1,5 +1,5 @@
 # LinxISA Encoding Space Report
-Spec: `spec/isa/spec/current/linxisa-v0.3.json`
+Spec: `isa/v0.3/linxisa-v0.3.json`
 ## Conflicts (part0 mask/match overlaps)
 Conflicts are reported at the **full instruction length** (all parts), not just part0.
 

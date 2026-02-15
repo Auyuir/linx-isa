@@ -2,9 +2,9 @@
 
 These tools operate on the canonical LinxISA v0.3 catalog.
 
-- Golden source root: `spec/isa/golden/v0.3/`
-- Compiled catalog: `spec/isa/spec/current/linxisa-v0.3.json`
-- Generated codecs: `spec/isa/generated/codecs/`
+- Golden source root: `isa/v0.3/`
+- Compiled catalog: `isa/v0.3/linxisa-v0.3.json`
+- Generated codecs: `isa/generated/codecs/`
 
 ## Core Commands
 
@@ -23,8 +23,8 @@ python3 tools/isa/validate_spec.py --profile v0.3
 Generate decode tables:
 
 ```bash
-python3 tools/isa/gen_qemu_codec.py --profile v0.3 --out-dir spec/isa/generated/codecs
-python3 tools/isa/gen_c_codec.py --profile v0.3 --out-dir spec/isa/generated/codecs
+python3 tools/isa/gen_qemu_codec.py --profile v0.3 --out-dir isa/generated/codecs
+python3 tools/isa/gen_c_codec.py --profile v0.3 --out-dir isa/generated/codecs
 ```
 
 Generate manual fragments:

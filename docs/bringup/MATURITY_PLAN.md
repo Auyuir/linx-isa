@@ -4,7 +4,7 @@ Last updated: 2026-02-12
 
 ## Baseline policy
 
-- `spec/isa/spec/current/linxisa-v0.3.json` is the default architectural contract.
+- `isa/v0.3/linxisa-v0.3.json` is the default architectural contract.
 - `v0.2` remains available only as explicit legacy compatibility.
 - 26 checks in `docs/bringup/check26_contract.yaml` are mandatory and machine-gated.
 

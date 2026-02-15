@@ -1,7 +1,7 @@
 [[intro]]
 == Introduction
 
-Linx is a RISC-style instruction set architecture whose *control-flow contract* and *temporary value model* are
+Linx is a **block-structured** RISC-style instruction set architecture whose *control-flow contract* and *temporary value model* are
 intentionally different from classic RISC designs.
 
 At a high level, Linx is designed to be:

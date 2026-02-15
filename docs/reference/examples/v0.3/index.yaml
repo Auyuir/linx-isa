@@ -6,7 +6,7 @@ entries:
     source: docs/reference/examples/v0.3/legacy-reference/disasm_example.s
     generation: manual-curation
   - path: docs/reference/examples/v0.3/curated/linxisa-v0.3-normalized.asm
-    source: spec/isa/golden/v0.3/reconcile/linxisa-v0.3-example.normalized.asm
+    source: isa/v0.3/reconcile/linxisa-v0.3-example.normalized.asm
     generation: manual-curation
   - path: docs/reference/examples/v0.3/scratch-legacy/simple.s
     source: avs/scratch/simple.s

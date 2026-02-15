@@ -34,12 +34,12 @@ else
   python3 "$ROOT/tools/isa/check_no_legacy_v03.py" --root "$ROOT"
 fi
 
-python3 "$ROOT/tools/isa/report_encoding_space.py" --spec "$ROOT/spec/isa/spec/current/linxisa-v0.3.json" --out "$ROOT/docs/reference/encoding_space_report.md" --check
-python3 "$ROOT/tools/isa/gen_qemu_codec.py" --spec "$ROOT/spec/isa/spec/current/linxisa-v0.3.json" --out-dir "$ROOT/spec/isa/generated/codecs" --check
-python3 "$ROOT/tools/isa/gen_c_codec.py" --spec "$ROOT/spec/isa/spec/current/linxisa-v0.3.json" --out-dir "$ROOT/spec/isa/generated/codecs" --check
-python3 "$ROOT/tools/isa/gen_manual_adoc.py" --spec "$ROOT/spec/isa/spec/current/linxisa-v0.3.json" --out-dir "$ROOT/docs/architecture/isa-manual/src/generated" --check
-python3 "$ROOT/tools/isa/gen_ssr_adoc.py" --spec "$ROOT/spec/isa/spec/current/linxisa-v0.3.json" --out-dir "$ROOT/docs/architecture/isa-manual/src/generated" --check
-python3 "$ROOT/tools/isa/sail_coverage.py" --spec "$ROOT/spec/isa/spec/current/linxisa-v0.3.json" --implemented "$ROOT/spec/isa/sail/implemented_mnemonics.txt" --out "$ROOT/spec/isa/sail/coverage.json" --check
+python3 "$ROOT/tools/isa/report_encoding_space.py" --spec "$ROOT/isa/v0.3/linxisa-v0.3.json" --out "$ROOT/docs/reference/encoding_space_report.md" --check
+python3 "$ROOT/tools/isa/gen_qemu_codec.py" --spec "$ROOT/isa/v0.3/linxisa-v0.3.json" --out-dir "$ROOT/isa/generated/codecs" --check
+python3 "$ROOT/tools/isa/gen_c_codec.py" --spec "$ROOT/isa/v0.3/linxisa-v0.3.json" --out-dir "$ROOT/isa/generated/codecs" --check
+python3 "$ROOT/tools/isa/gen_manual_adoc.py" --spec "$ROOT/isa/v0.3/linxisa-v0.3.json" --out-dir "$ROOT/docs/architecture/isa-manual/src/generated" --check
+python3 "$ROOT/tools/isa/gen_ssr_adoc.py" --spec "$ROOT/isa/v0.3/linxisa-v0.3.json" --out-dir "$ROOT/docs/architecture/isa-manual/src/generated" --check
+python3 "$ROOT/tools/isa/sail_coverage.py" --spec "$ROOT/isa/v0.3/linxisa-v0.3.json" --implemented "$ROOT/isa/sail/implemented_mnemonics.txt" --out "$ROOT/isa/sail/coverage.json" --check
 
 # Allow callers to override tool locations.
 CLANG="${CLANG:-}"
@@ -128,7 +128,7 @@ CTUNING_ROOT="${CTUNING_ROOT:-$HOME/ctuning-programs}"
 CTUNING_LIMIT="${CTUNING_LIMIT:-5}"
 BENCH_TARGET="${BENCH_TARGET:-linx64-linx-none-elf}"
 if [[ -d "$CTUNING_ROOT/program" ]]; then
-  python3 "$ROOT/workloads/benchmarks/ctuning/run_milepost_codelets.py" \
+  python3 "$ROOT/workloads/ctuning/run_milepost_codelets.py" \
     --ctuning-root "$CTUNING_ROOT" \
     --clang "$CLANG" \
     --lld "$LLD" \

@@ -1,14 +1,12 @@
 # Phase 8: Toolchain/musl Bring-up
 
-Primary scripts and patch stacks:
+Canonical source repository:
 
-- `tools/libc/apply-musl-patches.sh`
-- `tools/libc/build-musl.sh`
-- `tools/libc/patches/musl/0001-musl-linx64-bootstrap.patch`
+- `lib/musl` (`git@github.com:LinxISA/musl.git`)
 
 ## Objective
 
-Bootstrap musl support for `linx64-unknown-linux-musl` with incremental compile gates.
+Bootstrap musl support for `linx64-unknown-linux-musl` with incremental compile gates in the forked musl repository.
 
 ## Role in the bring-up sequence
 
@@ -20,16 +18,14 @@ Bootstrap musl support for `linx64-unknown-linux-musl` with incremental compile 
 From repo root:
 
 ```bash
-make libc-init
-make libc-patch-musl
-make libc-build-musl
+cd lib/musl
+# run fork-maintained musl bring-up scripts/workflow
 ```
 
 Artifacts and logs:
 
-- Build/install root: `out/libc/musl/`
-- Logs: `out/libc/musl/logs/`
-- Gate artifact: `out/libc/musl/install/lib/libc.a`
+- Artifacts/log locations are defined by the fork workflow.
+- Gate artifact should include static libc archive (`libc.a`).
 
 ## Current gates
 

@@ -4,23 +4,23 @@
 
 <h1 align="center">Linx Instruction Set Architecture</h1>
 
-<p align="center"><strong>Public workspace for LinxISA specification, AVS validation, and ecosystem submodule pinning.</strong></p>
+<p align="center"><strong>Public workspace for the block-structured LinxISA specification, AVS validation, and ecosystem submodule pinning.</strong></p>
 
 ## Overview
 
 This repository is now submodule-first for implementation domains and AVS-centric for test content.
 In-repo focus is:
 
-- ISA/spec sources and generators
+- ISA sources and generators
 - AVS test suites and validation matrix
 - bring-up docs and navigation
 - submodule pinning of ecosystem repos
 
 ## Canonical Sources
 
-- ISA golden sources: `spec/isa/golden/v0.3/`
-- ISA compiled catalog: `spec/isa/spec/current/linxisa-v0.3.json`
-- ISA generated codecs: `spec/isa/generated/codecs/`
+- ISA golden sources: `isa/v0.3/`
+- ISA compiled catalog: `isa/v0.3/linxisa-v0.3.json`
+- ISA generated codecs: `isa/generated/codecs/`
 - ISA manual sources: `docs/architecture/isa-manual/`
 - Assembly sample pack: `docs/reference/examples/v0.3/`
 
@@ -57,9 +57,9 @@ git submodule update --init --recursive
 - `emulator/`: QEMU submodule only
 - `kernel/`: Linux submodule
 - `rtl/`: LinxCore submodule + RTL notes
-- `tools/`: generators, libc tooling, pyCircuit submodule, regression scripts
-- `workloads/benchmarks/`: upstream benchmark sources + runners
-- `spec/`: ISA specification assets
+- `tools/`: generators, pyCircuit submodule, regression scripts
+- `workloads/`: upstream benchmark sources + runners
+- `isa/`: ISA specification assets
 - `docs/`: bring-up, architecture, migration, navigation
 
 ## Navigation

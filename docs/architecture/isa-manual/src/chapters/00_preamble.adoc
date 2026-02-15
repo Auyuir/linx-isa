@@ -1,12 +1,12 @@
 [[preamble]]
 == Preamble
 
-This document is the canonical ISA manual for the **Linx Instruction Set Architecture (Linx ISA)**, version **v0.3**.
+This document is the canonical manual for the **block-structured Linx Instruction Set Architecture (Linx ISA)**, version **v0.3**.
 
 The single source of truth for instruction encodings in this repository is:
 
-* `spec/isa/spec/current/linxisa-v0.3.json` (machine-readable catalog built from `spec/isa/golden/v0.3/`)
-* `spec/isa/generated/codecs/` (generated encode/decode tables derived from the JSON)
+* `isa/v0.3/linxisa-v0.3.json` (machine-readable catalog built from `isa/v0.3/`)
+* `isa/generated/codecs/` (generated encode/decode tables derived from the JSON)
 
 Where this manual and the machine-readable catalog disagree, the JSON catalog MUST be treated as authoritative.
 
@@ -31,7 +31,7 @@ This manual describes the **v0.3 Linx ISA** - a production-ready architecture th
 
 The LinxISA project maintains alignment between:
 
-* The machine-readable catalog (`spec/isa/spec/current/linxisa-v0.3.json`)
+* The machine-readable catalog (`isa/v0.3/linxisa-v0.3.json`)
 * The LLVM backend (`llvm-project/llvm/lib/Target/LinxISA/`)
 * The QEMU emulator (`qemu/target/linx/`)
 * This manual

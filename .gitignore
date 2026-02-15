@@ -46,16 +46,16 @@ docs/architecture/isa-manual/vendor/
 docs/architecture/isa-manual/.bundle/
 
 # ctuning milepost runner outputs
-workloads/benchmarks/ctuning/out/
+workloads/ctuning/out/
 
 # PTO bridge example outputs (generated)
 tools/pto/out/
 
 # Workloads harness outputs
 workloads/generated/
-workloads/benchmarks/out/
-workloads/benchmarks/third_party/
-workloads/benchmarks/**/docs/html/
+workloads/out/
+workloads/third_party/
+workloads/**/docs/html/
 
 # ctuning scratch (non-source)
-workloads/benchmarks/ctuning/out_single/
+workloads/ctuning/out_single/

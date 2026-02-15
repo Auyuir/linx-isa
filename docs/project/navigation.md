@@ -1,4 +1,4 @@
-# LinxISA Navigation Guide (v0.4)
+# LinxISA Navigation Guide (v0.5)
 
 This is the canonical navigation contract for contributors and agents.
 
@@ -11,11 +11,11 @@ This is the canonical navigation contract for contributors and agents.
 - `emulator/` — upstream QEMU submodule (`emulator/qemu`)
 - `kernel/` — upstream Linux submodule (`kernel/linux`)
 - `rtl/` — LinxCore submodule (`rtl/LinxCore`) + rtl notes
-- `tools/` — generators, regression, libc tooling, pyCircuit submodule
+- `tools/` — generators, regression, pyCircuit submodule
 - `workloads/` — benchmark runners + generated workload artifacts
-- `spec/` — ISA source of truth and generated catalogs
+- `isa/` — ISA source of truth and generated catalogs
 - `docs/` — architecture, bring-up, migration, project references
-- `lib/` — glibc/musl fork submodules and libc bring-up notes
+- `lib/` — glibc/musl fork submodules
 
 ## Canonical test locations
 
@@ -25,17 +25,17 @@ This is the canonical navigation contract for contributors and agents.
 
 ## Canonical toolchain support locations
 
-- Freestanding libc support used by AVS/tests: `tools/libc/freestanding/`
-- Linux libc bring-up automation: `tools/libc/`
+- Freestanding libc support used by AVS/tests: `avs/runtime/freestanding/`
+- Linux libc source forks: `lib/glibc/`, `lib/musl/`
 - PTO bridge headers: `tools/pto/include/pto/`
 - LLVM opcode sync helper: `tools/isa/sync_generated_opcodes.sh`
 
 ## Benchmark locations
 
-- CoreMark upstream: `workloads/benchmarks/coremark/upstream/`
-- Dhrystone upstream: `workloads/benchmarks/dhrystone/upstream/`
-- PolyBench source cache: `workloads/benchmarks/third_party/PolyBenchC/`
-- ctuning runner: `workloads/benchmarks/ctuning/`
+- CoreMark upstream: `workloads/coremark/upstream/`
+- Dhrystone upstream: `workloads/dhrystone/upstream/`
+- PolyBench source cache: `workloads/third_party/PolyBenchC/`
+- ctuning runner: `workloads/ctuning/`
 
 ## Removed / forbidden paths
 
@@ -49,6 +49,11 @@ Do not add or revive these paths:
 - `tests/`
 - `docs/validation/avs/`
 - `tools/ctuning/`
+- `tools/libc/`
+- `tools/glibc/`
+- `workloads/benchmarks/`
+- `workloads/examples/`
+- `spec/`
 
 CI guard: `tools/ci/check_repo_layout.sh`
 

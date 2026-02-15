@@ -47,7 +47,7 @@ if [[ ! -x "$LLD" ]]; then
 fi
 
 REPO_ROOT="$(cd "$ROOT/../../../../" && pwd)"
-LIBC_DIR="$REPO_ROOT/tools/libc/freestanding"
+LIBC_DIR="$REPO_ROOT/avs/runtime/freestanding"
 LIBC_INCLUDE="$LIBC_DIR/include"
 SOFTFP_SRC="$LIBC_DIR/src/softfp/softfp.c"
 SOFTFP_STUBS_SRC="$ROOT/support/softfp_stubs.c"
@@ -175,7 +175,7 @@ if [[ $FAILED -ne 0 ]]; then
   exit 1
 fi
 
-SPEC="${SPEC:-$ROOT/../../../../spec/isa/spec/current/linxisa-v0.3.json}"
+SPEC="${SPEC:-$ROOT/../../../../isa/v0.3/linxisa-v0.3.json}"
 GEN_VECTORS="$ROOT/gen_disasm_vectors.py"
 
 if [[ -f "$SPEC" && -f "$GEN_VECTORS" ]]; then

@@ -2,7 +2,7 @@
 """
 Generate QEMU decodetree-style codec files from the compiled ISA JSON spec.
 
-Outputs (by default) into `spec/isa/generated/codecs/`:
+Outputs (by default) into `isa/generated/codecs/`:
   - linxisa16.decode
   - linxisa32.decode
   - linxisa48.decode
@@ -333,7 +333,7 @@ def main() -> int:
     )
     ap.add_argument(
         "--out-dir",
-        default=os.path.join("spec", "isa", "generated", "codecs"),
+        default=os.path.join("isa", "generated", "codecs"),
         help="Output directory for codec files",
     )
     ap.add_argument(
@@ -343,7 +343,7 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    default_spec = os.path.join("spec", "isa", "spec", "current", "linxisa-v0.3.json")
+    default_spec = os.path.join("isa", "v0.3", "linxisa-v0.3.json")
     spec_path = args.spec or default_spec
 
     with open(spec_path, "r", encoding="utf-8") as f:

@@ -1,4 +1,4 @@
-# LinxISA Agent Navigation Contract (v0.4)
+# LinxISA Agent Navigation Contract (v0.5)
 
 Follow `docs/project/navigation.md` as the canonical map.
 
@@ -11,7 +11,7 @@ Follow `docs/project/navigation.md` as the canonical map.
 - `rtl`
 - `tools`
 - `workloads`
-- `spec`
+- `isa`
 - `docs`
 - `lib`
 
@@ -19,8 +19,7 @@ Follow `docs/project/navigation.md` as the canonical map.
 
 - Runtime tests: `avs/qemu/`
 - Compile-only tests: `avs/compiler/linx-llvm/tests/`
-- Freestanding libc support: `tools/libc/freestanding/`
-- Linux libc bring-up scripts/patches: `tools/libc/`
+- Freestanding libc support: `avs/runtime/freestanding/`
 - pyCircuit workspace mirror: `tools/pyCircuit/` (submodule)
 - Assembly sample pack: `docs/reference/examples/v0.3/`
 
@@ -36,6 +35,11 @@ Do not create, restore, or route new work to:
 - `tests/`
 - `docs/validation/avs/`
 - `tools/ctuning/`
+- `tools/libc/`
+- `tools/glibc/`
+- `workloads/benchmarks/`
+- `workloads/examples/`
+- `spec/`
 
 ## No random folders rule
 

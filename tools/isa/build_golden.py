@@ -3,10 +3,10 @@
 Build the compiled LinxISA v0.3 catalog from the multi-file golden sources.
 
 Golden sources live under:
-  spec/isa/golden/v0.3/
+  isa/v0.3/
 
 Compiled output is checked in at:
-  spec/isa/spec/current/linxisa-v0.3.json
+  isa/v0.3/linxisa-v0.3.json
 
 This builder is intentionally deterministic:
   - no timestamps
@@ -592,7 +592,7 @@ def _canonical_json(obj: Any) -> str:
 
 
 def _profile_defaults() -> Tuple[str, str]:
-    return "spec/isa/golden/v0.3", "spec/isa/spec/current/linxisa-v0.3.json"
+    return "isa/v0.3", "isa/v0.3/linxisa-v0.3.json"
 
 
 def main() -> int:

@@ -20,14 +20,14 @@ Comparable to Arm/x86/RISC-V maturity means:
 ## Current Strengths (Evidence in Repo)
 
 - Golden opcode database and generated JSON catalog:
-  - `spec/isa/golden/v0.3/` -> `spec/isa/spec/current/linxisa-v0.3.json`
+  - `isa/v0.3/` -> `isa/v0.3/linxisa-v0.3.json`
 - Encoding conflict checks and hole reporting:
   - `python3 tools/isa/report_encoding_space.py --check`
   - Report: `docs/reference/encoding_space_report.md`
 - LLVM backend has full mnemonic disassembly coverage when using the per-target outputs:
   - `python3 avs/compiler/linx-llvm/tests/analyze_coverage.py --out-dir avs/compiler/linx-llvm/tests/out-linx64 --fail-under 100`
 - Benchmark harness exists with static and dynamic instruction statistics:
-  - `python3 workloads/benchmarks/run_benchmarks.py --dynamic-hist`
+  - `python3 workloads/run_benchmarks.py --dynamic-hist`
 
 ## Gaps: ISA Specification
 
@@ -105,8 +105,8 @@ Comparable to Arm/x86/RISC-V maturity means:
 
 - Third-party sources exist, but only a freestanding-friendly subset is expected
   to run early:
-  - Fetch script: `workloads/benchmarks/fetch_third_party.sh`
-  - Method: `workloads/benchmarks/BENCHMARKING_METHOD.md`
+  - Fetch script: `workloads/fetch_third_party.sh`
+  - Method: `workloads/BENCHMARKING_METHOD.md`
   - Reality:
     - Hosted workloads (full LLVM test-suite, Google Benchmark) require more libc
       and OS services than the current minimal environment provides.

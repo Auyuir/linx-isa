@@ -259,7 +259,7 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    default_spec = os.path.join("spec", "isa", "spec", "current", "linxisa-v0.3.json")
+    default_spec = os.path.join("isa", "v0.3", "linxisa-v0.3.json")
     spec_path = args.spec or default_spec
     spec = _read_json(spec_path)
     sysregs = (((spec.get("state") or {}).get("system_registers")) or {})

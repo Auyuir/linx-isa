@@ -450,7 +450,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--spec",
-        default="spec/isa/spec/current/linxisa-v0.3.json",
+        default="isa/v0.3/linxisa-v0.3.json",
         help="Path to ISA catalog JSON"
     )
     ap.add_argument(

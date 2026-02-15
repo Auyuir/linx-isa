@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Generate AsciiDoc fragments for the Linx ISA manual from a compiled LinxISA JSON spec
-(`spec/isa/spec/current/linxisa-v*.json`).
+(`isa/v*/linxisa-v*.json`).
 
 This tool is intentionally lightweight: it emits tables and summaries that are easier to keep
 in sync with the canonical machine-readable catalog than handwritten listings.
@@ -1201,10 +1201,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--check", action="store_true", help="Fail if outputs are not up-to-date")
     args = ap.parse_args(argv)
 
-    spec_path = args.spec or "spec/isa/spec/current/linxisa-v0.3.json"
+    spec_path = args.spec or "isa/v0.3/linxisa-v0.3.json"
     spec = _read_json(spec_path)
     spec_version = str(spec.get("version") or "").strip() or "?"
-    golden_hint = f"spec/isa/golden/v{spec_version}/" if spec_version != "?" else "spec/isa/golden/v*/"
+    golden_hint = f"isa/v{spec_version}/" if spec_version != "?" else "isa/v*/"
     spec_label = os.path.basename(os.path.normpath(spec_path))
     source_comment = f"// Source: {spec_label} (built from {golden_hint})"
     instructions: List[Dict[str, Any]] = _filter_canonical_instructions(

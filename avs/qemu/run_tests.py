@@ -220,7 +220,7 @@ def main(argv: list[str]) -> int:
     obj_dir.mkdir(parents=True, exist_ok=True)
 
     include_dir = SCRIPT_DIR / "lib"
-    libc_include_dir = REPO_ROOT / "tools" / "libc" / "freestanding" / "include"
+    libc_include_dir = REPO_ROOT / "avs" / "runtime" / "freestanding" / "include"
     pto_bridge_include_dir = REPO_ROOT / "tools" / "pto" / "include"
     if "tile" in selected and not pto_bridge_include_dir.exists():
         raise SystemExit(
@@ -240,7 +240,7 @@ def main(argv: list[str]) -> int:
             sources.append(REPO_ROOT / rel)
     softfp_suites = {"float", "v03_vector", "v03_vector_ops"}
     if any(s in softfp_suites for s in selected):
-        sources.append(REPO_ROOT / "tools" / "libc" / "freestanding" / "src" / "softfp" / "softfp.c")
+        sources.append(REPO_ROOT / "avs" / "runtime" / "freestanding" / "src" / "softfp" / "softfp.c")
 
     suite_macros: list[str] = []
     for name, meta in SUITES.items():

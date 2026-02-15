@@ -158,7 +158,7 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    default_spec = "spec/isa/spec/current/linxisa-v0.3.json"
+    default_spec = "isa/v0.3/linxisa-v0.3.json"
     errors = validate(args.spec or default_spec)
     if errors:
         for e in errors[:200]:

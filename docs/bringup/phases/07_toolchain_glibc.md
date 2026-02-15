@@ -1,19 +1,12 @@
 # Phase 7: Toolchain/glibc Bring-up
 
-Primary scripts and patch stacks:
+Canonical source repository:
 
-- `tools/libc/apply-glibc-patches.sh`
-- `tools/libc/build-glibc.sh`
-- `tools/libc/patches/glibc/0001-glibc-linx-machine-triplet.patch`
-- `tools/libc/patches/glibc/0002-glibc-linx-sysdeps-bootstrap.patch`
-
-Legacy compatibility path:
-
-- `tools/glibc/bringup_linx64.sh` (wrapper to `tools/libc/build-glibc.sh`)
+- `lib/glibc` (`git@github.com:LinxISA/glibc.git`)
 
 ## Objective
 
-Produce a reproducible glibc bring-up flow for `linx64-unknown-linux-gnu` directly from this repo.
+Track and validate Linx glibc bring-up for `linx64-unknown-linux-gnu` in the forked glibc repository.
 
 ## Role in the bring-up sequence
 
@@ -22,24 +15,21 @@ Produce a reproducible glibc bring-up flow for `linx64-unknown-linux-gnu` direct
 
 ## Workflow
 
-From repo root:
+From the `lib/glibc` submodule:
 
 ```bash
-make libc-init
-make libc-patch-glibc
-make libc-build-glibc
+cd lib/glibc
+# run fork-maintained glibc bring-up scripts/workflow
 ```
 
 Artifacts and logs:
 
-- Build/install root: `out/libc/glibc/`
-- Logs: `out/libc/glibc/logs/`
-- Gate artifacts: `out/libc/glibc/install/lib/libc.so`, `out/libc/glibc/install/lib/crt1.o`
+- Artifacts/log locations are defined by the fork workflow.
+- Gate artifacts should include `libc.so` and startup objects (`crt*.o`) for Linx target.
 
 ## Current gates
 
-- `G1`: configure + build glibc gate targets (`csu/subdir_lib`, `csu/crt1.o`, `libc.so`)
-- Build flow forces `-fuse-ld=lld` to avoid host linker incompatibilities on macOS.
+- `G1`: configure + build glibc gate targets (`csu/subdir_lib`, `csu/crt1.o`, `libc.so`).
 
 ## Exit criteria
 

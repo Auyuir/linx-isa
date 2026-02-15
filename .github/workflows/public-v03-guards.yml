@@ -15,10 +15,5 @@ jobs:
       - name: Enforce Public v0.3 Guard
         run: bash tools/ci/check_public_v03.sh
 
-      - name: Warn On Shim Path Touches
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: bash tools/ci/warn_shim_touches.sh "$PR_BASE_SHA"
-
       - name: Enforce Repository Layout
         run: bash tools/ci/check_repo_layout.sh

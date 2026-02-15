@@ -7,6 +7,7 @@ cd "$ROOT"
 fail=0
 
 must_not_exist=(
+  "spec"
   "compiler/linx-llvm"
   "emulator/linx-qemu"
   "examples"
@@ -15,6 +16,10 @@ must_not_exist=(
   "tests"
   "docs/validation/avs"
   "tools/ctuning"
+  "tools/libc"
+  "tools/glibc"
+  "workloads/benchmarks"
+  "workloads/examples"
   "~"
 )
 
@@ -27,6 +32,11 @@ done
 
 if [[ ! -d avs || -L avs ]]; then
   echo "error: avs must be a real directory (not symlink)" >&2
+  fail=1
+fi
+
+if [[ ! -d isa || -L isa ]]; then
+  echo "error: isa must be a real directory (not symlink)" >&2
   fail=1
 fi
 
