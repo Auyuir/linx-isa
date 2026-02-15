@@ -100,61 +100,40 @@ fi
 
 echo
 echo "-- Compiler compile-only tests (linx64)"
-(cd "$ROOT/compiler/linx-llvm/tests" && CLANG="$CLANG" TARGET="linx64-linx-none-elf" OUT_DIR="$ROOT/compiler/linx-llvm/tests/out-linx64" ./run.sh)
+(cd "$ROOT/avs/compiler/linx-llvm/tests" && CLANG="$CLANG" TARGET="linx64-linx-none-elf" OUT_DIR="$ROOT/avs/compiler/linx-llvm/tests/out-linx64" ./run.sh)
 
 echo
 echo "-- Compiler coverage report (linx64)"
-python3 "$ROOT/compiler/linx-llvm/tests/analyze_coverage.py" --out-dir "$ROOT/compiler/linx-llvm/tests/out-linx64" --fail-under "${COVERAGE_FAIL_UNDER:-100}"
+python3 "$ROOT/avs/compiler/linx-llvm/tests/analyze_coverage.py" --out-dir "$ROOT/avs/compiler/linx-llvm/tests/out-linx64" --fail-under "${COVERAGE_FAIL_UNDER:-100}"
 
 echo
 echo "-- Compiler compile-only tests (linx32)"
-(cd "$ROOT/compiler/linx-llvm/tests" && CLANG="$CLANG" TARGET="linx32-linx-none-elf" OUT_DIR="$ROOT/compiler/linx-llvm/tests/out-linx32" ./run.sh)
+(cd "$ROOT/avs/compiler/linx-llvm/tests" && CLANG="$CLANG" TARGET="linx32-linx-none-elf" OUT_DIR="$ROOT/avs/compiler/linx-llvm/tests/out-linx32" ./run.sh)
 
 echo
 echo "-- Compiler coverage report (linx32)"
-python3 "$ROOT/compiler/linx-llvm/tests/analyze_coverage.py" --out-dir "$ROOT/compiler/linx-llvm/tests/out-linx32" --fail-under "${COVERAGE_FAIL_UNDER:-100}"
+python3 "$ROOT/avs/compiler/linx-llvm/tests/analyze_coverage.py" --out-dir "$ROOT/avs/compiler/linx-llvm/tests/out-linx32" --fail-under "${COVERAGE_FAIL_UNDER:-100}"
 
 echo
 echo "-- QEMU strict system gate (ACR/IRQ/exception coverage + noise check)"
-(cd "$ROOT/tests/qemu" && CLANG="$CLANG" LLD="$LLD" QEMU="$QEMU" ./check_system_strict.sh)
+(cd "$ROOT/avs/qemu" && CLANG="$CLANG" LLD="$LLD" QEMU="$QEMU" ./check_system_strict.sh)
 
 echo
 echo "-- QEMU runtime tests"
-(cd "$ROOT/tests/qemu" && CLANG="$CLANG" LLD="$LLD" QEMU="$QEMU" ./run_tests.sh --all --timeout 10)
-
-echo
-echo "-- TSVC benchmark suite on QEMU (optional)"
-if [[ "${RUN_TSVC:-0}" == "1" ]]; then
-  TSVC_ARGS=(
-    --clang "$CLANG"
-    --lld "$LLD"
-    --qemu "$QEMU"
-    --timeout "${TSVC_TIMEOUT:-180}"
-    --iterations "${TSVC_ITERATIONS:-32}"
-    --len-1d "${TSVC_LEN_1D:-320}"
-    --len-2d "${TSVC_LEN_2D:-16}"
-    --vector-mode "${TSVC_VECTOR_MODE:-all}"
-    --coverage-fail-under "${TSVC_COVERAGE_FAIL_UNDER:-151}"
-  )
-  if [[ "${TSVC_NO_COVERAGE_GATE:-0}" == "1" ]]; then
-    TSVC_ARGS+=(--no-coverage-gate)
-  fi
-  python3 "$ROOT/workloads/benchmarks/run_tsvc.py" "${TSVC_ARGS[@]}"
-else
-  echo "note: skipping TSVC (set RUN_TSVC=1 to enable)"
-fi
+(cd "$ROOT/avs/qemu" && CLANG="$CLANG" LLD="$LLD" QEMU="$QEMU" ./run_tests.sh --all --timeout 10)
 
 echo
 echo "-- ctuning Milepost codelets (optional)"
 CTUNING_ROOT="${CTUNING_ROOT:-$HOME/ctuning-programs}"
 CTUNING_LIMIT="${CTUNING_LIMIT:-5}"
+BENCH_TARGET="${BENCH_TARGET:-linx64-linx-none-elf}"
 if [[ -d "$CTUNING_ROOT/program" ]]; then
-  python3 "$ROOT/tools/ctuning/run_milepost_codelets.py" \
+  python3 "$ROOT/workloads/benchmarks/ctuning/run_milepost_codelets.py" \
     --ctuning-root "$CTUNING_ROOT" \
     --clang "$CLANG" \
     --lld "$LLD" \
     --qemu "$QEMU" \
-    --target linx64-linx-none-elf \
+    --target "$BENCH_TARGET" \
     --run \
     --limit "$CTUNING_LIMIT"
 else

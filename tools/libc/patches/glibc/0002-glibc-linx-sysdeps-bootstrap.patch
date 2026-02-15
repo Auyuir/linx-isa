@@ -1,0 +1,644 @@
+diff --git a/sysdeps/linx/Implies b/sysdeps/linx/Implies
+new file mode 100644
+index 0000000000..1945b1f4bb
+--- /dev/null
++++ b/sysdeps/linx/Implies
+@@ -0,0 +1,3 @@
++ieee754/ldbl-128
++ieee754/dbl-64
++ieee754/flt-32
+diff --git a/sysdeps/linx/bits/endianness.h b/sysdeps/linx/bits/endianness.h
+new file mode 100644
+index 0000000000..45c6d83534
+--- /dev/null
++++ b/sysdeps/linx/bits/endianness.h
+@@ -0,0 +1,11 @@
++#ifndef _BITS_ENDIANNESS_H
++#define _BITS_ENDIANNESS_H 1
++
++#ifndef _BITS_ENDIAN_H
++# error "Never use <bits/endianness.h> directly; include <endian.h> instead."
++#endif
++
++/* Linx is little-endian.  */
++#define __BYTE_ORDER __LITTLE_ENDIAN
++
++#endif /* bits/endianness.h */
+diff --git a/sysdeps/linx/bits/link.h b/sysdeps/linx/bits/link.h
+new file mode 100644
+index 0000000000..db78e5832d
+--- /dev/null
++++ b/sysdeps/linx/bits/link.h
+@@ -0,0 +1,59 @@
++/* Machine-specific declarations for dynamic linker interface.  Linx version.
++   Copyright (C) 2026 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef _LINK_H
++# error "Never include <bits/link.h> directly; use <link.h> instead."
++#endif
++
++/* This header provides the GNU ld.so audit interface register/return value
++   descriptions.  Linx bring-up uses a conservative layout similar to other
++   RISC ABIs: a0-a7 for argument registers plus sp/ra.  */
++
++typedef struct La_linx_regs
++{
++  unsigned long int lr_reg[8]; /* a0 - a7 */
++  unsigned long int lr_ra;
++  unsigned long int lr_sp;
++} La_linx_regs;
++
++/* Return values for calls from PLT on Linx.  */
++typedef struct La_linx_retval
++{
++  unsigned long int lrv_a0;
++  unsigned long int lrv_a1;
++} La_linx_retval;
++
++__BEGIN_DECLS
++
++extern ElfW(Addr) la_linx_gnu_pltenter (ElfW(Sym) *__sym, unsigned int __ndx,
++				       uintptr_t *__refcook,
++				       uintptr_t *__defcook,
++				       La_linx_regs *__regs,
++				       unsigned int *__flags,
++				       const char *__symname,
++				       long int *__framesizep);
++
++extern unsigned int la_linx_gnu_pltexit (ElfW(Sym) *__sym, unsigned int __ndx,
++					uintptr_t *__refcook,
++					uintptr_t *__defcook,
++					const La_linx_regs *__inregs,
++					La_linx_retval *__outregs,
++					const char *__symname);
++
++__END_DECLS
++
+diff --git a/sysdeps/linx/bits/setjmp.h b/sysdeps/linx/bits/setjmp.h
+new file mode 100644
+index 0000000000..31763bd4f7
+--- /dev/null
++++ b/sysdeps/linx/bits/setjmp.h
+@@ -0,0 +1,37 @@
++/* Machine-dependent type `__jmp_buf' for Linx.
++   Copyright (C) 2026 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#if !defined _SETJMP_H && !defined _PTHREAD_H
++# error "Never include <bits/setjmp.h> directly; use <setjmp.h> instead."
++#endif
++
++#include <bits/wordsize.h>
++
++/* Bring-up layout: save integer GPRs plus PC.
++
++   Linx ISA currently defines 24 architectural integer registers (R0..R23)
++   and a program counter.  R0 is hard-wired zero but we reserve a slot for a
++   stable layout.
++
++   Once the Linx ABI finalizes the set of call-preserved registers, this can
++   be reduced to the minimum required set.  */
++#if __WORDSIZE == 64
++typedef long int __jmp_buf[25];
++#else
++typedef int __jmp_buf[25];
++#endif
+diff --git a/sysdeps/linx/dl-tls.h b/sysdeps/linx/dl-tls.h
+new file mode 100644
+index 0000000000..e27a6f44bd
+--- /dev/null
++++ b/sysdeps/linx/dl-tls.h
+@@ -0,0 +1,30 @@
++/* Thread-local storage handling in the ELF dynamic linker.  LinxISA version.
++   This file is part of the GNU C Library.
++ */
++
++#ifndef _DL_TLS_H
++#define _DL_TLS_H
++
++typedef struct
++{
++  unsigned long int ti_module;
++  unsigned long int ti_offset;
++} tls_index;
++
++#define TLS_TP_OFFSET 0
++#define TLS_DTV_OFFSET 0x800
++
++#define TLS_TPREL_VALUE(sym_map, sym) \
++  ((sym_map)->l_tls_offset + (sym)->st_value - TLS_TP_OFFSET)
++
++#define TLS_DTPREL_VALUE(sym) \
++  ((sym)->st_value - TLS_DTV_OFFSET)
++
++extern void *__tls_get_addr (tls_index *ti);
++
++#define __TLS_GET_ADDR(__ti) (__tls_get_addr (__ti) - TLS_DTV_OFFSET)
++
++#define TLS_DTV_UNALLOCATED ((void *) -1l)
++
++#endif /* _DL_TLS_H */
++
+diff --git a/sysdeps/linx/linx32/Implies-after b/sysdeps/linx/linx32/Implies-after
+new file mode 100644
+index 0000000000..39a34c5f57
+--- /dev/null
++++ b/sysdeps/linx/linx32/Implies-after
+@@ -0,0 +1 @@
++wordsize-32
+diff --git a/sysdeps/linx/linx64/Implies-after b/sysdeps/linx/linx64/Implies-after
+new file mode 100644
+index 0000000000..a8cae95f9d
+--- /dev/null
++++ b/sysdeps/linx/linx64/Implies-after
+@@ -0,0 +1 @@
++wordsize-64
+diff --git a/sysdeps/linx/linx64/arch-syscall.h b/sysdeps/linx/linx64/arch-syscall.h
+new file mode 100644
+index 0000000000..db6e4d5ce8
+--- /dev/null
++++ b/sysdeps/linx/linx64/arch-syscall.h
+@@ -0,0 +1,8 @@
++/* Linx syscall numbers (bring-up).
++
++   glibc normally uses an autogenerated arch-syscall.h list rather than
++   <asm/unistd.h>. During the Linx bring-up we include the installed kernel
++   UAPI header to provide __NR_* definitions.  */
++
++#include <asm/unistd.h>
++
+diff --git a/sysdeps/linx/nptl/pthreaddef.h b/sysdeps/linx/nptl/pthreaddef.h
+new file mode 100644
+index 0000000000..d6d5659884
+--- /dev/null
++++ b/sysdeps/linx/nptl/pthreaddef.h
+@@ -0,0 +1,19 @@
++/* pthread machine parameter definitions, LinxISA bring-up version.
++   This file is part of the GNU C Library.
++ */
++
++/* Default stack size.  */
++#define ARCH_STACK_DEFAULT_SIZE (2 * 1024 * 1024)
++
++/* Minimum guard size.  */
++#define ARCH_MIN_GUARD_SIZE 0
++
++/* Required stack pointer alignment at beginning.  */
++#define STACK_ALIGN 16
++
++/* Minimal stack size after allocating thread descriptor and guard size.  */
++#define MINIMAL_REST_STACK 2048
++
++/* Location of current stack frame.  */
++#define CURRENT_STACK_FRAME __builtin_frame_address (0)
++
+diff --git a/sysdeps/linx/nptl/tls.h b/sysdeps/linx/nptl/tls.h
+new file mode 100644
+index 0000000000..efb642ff31
+--- /dev/null
++++ b/sysdeps/linx/nptl/tls.h
+@@ -0,0 +1,94 @@
++/* Definition for thread-local data handling.  NPTL/LinxISA bring-up version.
++   This file is part of the GNU C Library.
++ */
++
++#ifndef _LINX_TLS_H
++#define _LINX_TLS_H 1
++
++#include <dl-sysdep.h>
++
++#ifndef __ASSEMBLER__
++# include <stdbool.h>
++# include <stddef.h>
++# include <stdint.h>
++# include <dl-dtv.h>
++
++/* Bring-up: TP is a System Status Register (SSR 0x0000). */
++# define LINX_SSR_TP 0x0000
++
++static inline void *__linx_read_tp(void)
++{
++  void *tp;
++  __asm__ volatile ("ssrget %1, ->%0"
++                    : "=r" (tp)
++                    : "i" (LINX_SSR_TP)
++                    : "memory");
++  return tp;
++}
++
++static inline void __linx_write_tp(void *tp)
++{
++  __asm__ volatile ("ssrset %0, %1"
++                    :
++                    : "r" (tp), "i" (LINX_SSR_TP)
++                    : "memory");
++}
++
++# define READ_THREAD_POINTER() __linx_read_tp()
++
++/* Get system call information.  */
++# include <sysdep.h>
++
++/* The TP points to the start of the thread blocks.  */
++# define TLS_DTV_AT_TP 1
++# define TLS_TCB_AT_TP 0
++
++/* Get the thread descriptor definition.  */
++# include <nptl/descr.h>
++
++typedef struct
++{
++  dtv_t *dtv;
++  void *private;
++} tcbhead_t;
++
++/* This is the size of the initial TCB.  */
++# define TLS_INIT_TCB_SIZE 0
++# define TLS_TCB_SIZE 0
++
++/* This is the size we need before TCB - actually, it includes the TCB.  */
++# define TLS_PRE_TCB_SIZE \
++  (sizeof (struct pthread)                                                  \
++   + ((sizeof (tcbhead_t) + __alignof (struct pthread) - 1)                 \
++      & ~(__alignof (struct pthread) - 1)))
++
++/* The thread pointer points to the end of the TCB.  */
++# define TLS_TCB_OFFSET 0
++
++# define INSTALL_DTV(tcbp, dtvp) (((tcbhead_t *) (tcbp))[-1].dtv = (dtvp) + 1)
++# define INSTALL_NEW_DTV(dtv) (THREAD_DTV() = (dtv))
++# define GET_DTV(tcbp) (((tcbhead_t *) (tcbp))[-1].dtv)
++
++# define TLS_INIT_TP(tcbp) \
++  ({ __linx_write_tp ((char *) (tcbp) + TLS_TCB_OFFSET); true; })
++
++# define THREAD_DTV() \
++  (((tcbhead_t *) (READ_THREAD_POINTER () - TLS_TCB_OFFSET))[-1].dtv)
++
++# define THREAD_SELF \
++  ((struct pthread *) (READ_THREAD_POINTER ()                               \
++                       - TLS_TCB_OFFSET - TLS_PRE_TCB_SIZE))
++
++# define TLS_DEFINE_INIT_TP(tp, pd) \
++  void *tp = (void *) (pd) + TLS_TCB_OFFSET + TLS_PRE_TCB_SIZE
++
++/* libthread_db support is not yet implemented for LinxISA bring-up.  */
++# define DB_THREAD_SELF 0
++
++# include <tcb-access.h>
++
++# define NO_TLS_OFFSET -1
++
++#endif /* !__ASSEMBLER__ */
++
++#endif /* _LINX_TLS_H */
+diff --git a/sysdeps/linx/preconfigure b/sysdeps/linx/preconfigure
+new file mode 100644
+index 0000000000..b622910c90
+--- /dev/null
++++ b/sysdeps/linx/preconfigure
+@@ -0,0 +1,12 @@
++# Local preconfigure fragment for sysdeps/linx.
++
++case "$machine" in
++linx64)
++  base_machine=linx
++  machine=linx/linx64
++  ;;
++linx32)
++  base_machine=linx
++  machine=linx/linx32
++  ;;
++esac
+diff --git a/sysdeps/unix/sysv/linux/linx/Implies b/sysdeps/unix/sysv/linux/linx/Implies
+new file mode 100644
+index 0000000000..82c3909526
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/linx/Implies
+@@ -0,0 +1 @@
++linx/nptl
+diff --git a/sysdeps/unix/sysv/linux/linx/bits/procfs.h b/sysdeps/unix/sysv/linux/linx/bits/procfs.h
+new file mode 100644
+index 0000000000..f287a5fd61
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/linx/bits/procfs.h
+@@ -0,0 +1,25 @@
++/* Architecture-specific procfs register set types for LinxISA (bring-up).
++   This file is part of the GNU C Library.
++ */
++
++#ifndef _LINX_BITS_PROCFS_H
++#define _LINX_BITS_PROCFS_H 1
++
++#include <stdint.h>
++
++/* General-purpose register type. */
++typedef unsigned long int elf_greg_t;
++
++/* General-purpose register set.
++   LinxISA currently models 24 architectural GPRs (R0-R23) in the bring-up ABI.
++   Keep extra slots for future expansion and for debugger friendliness.  */
++typedef elf_greg_t elf_gregset_t[32];
++
++/* Floating-point register set (placeholder for bring-up).  */
++typedef struct
++{
++  uint64_t fpregs[32];
++} elf_fpregset_t;
++
++#endif /* _LINX_BITS_PROCFS_H */
++
+diff --git a/sysdeps/unix/sysv/linux/linx/sys/user.h b/sysdeps/unix/sysv/linux/linx/sys/user.h
+new file mode 100644
+index 0000000000..e882430b81
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/linx/sys/user.h
+@@ -0,0 +1,10 @@
++/* Minimal <sys/user.h> for LinxISA (bring-up).
++   This header is used by debug/procfs interfaces; LinxISA does not yet define
++   a stable ptrace/procfs ABI, so keep this intentionally minimal.
++ */
++
++#ifndef _SYS_USER_H
++#define _SYS_USER_H 1
++
++#endif /* _SYS_USER_H */
++
+diff --git a/sysdeps/unix/sysv/linux/linx/sysdep.h b/sysdeps/unix/sysv/linux/linx/sysdep.h
+new file mode 100644
+index 0000000000..8bc7d742b0
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/linx/sysdep.h
+@@ -0,0 +1,243 @@
++/* Assembly/C macros for LinxISA Linux syscalls (bring-up).
++   This file is part of the GNU C Library.
++
++   NOTE: LinxISA is a block-structured ISA. For bring-up, we model Linux-style
++   syscalls using `ebreak 15` with the following convention:
++     a7 = syscall number
++     a0..a5 = args
++     a0 = return value (negative errno in range [-4095, -1] on error)
++ */
++
++#ifndef _LINUX_LINX_SYSDEP_H
++#define _LINUX_LINX_SYSDEP_H 1
++
++#include <sysdeps/unix/sysv/linux/sysdep.h>
++#include <sysdeps/unix/sysdep.h>
++#include <tls.h>
++
++#undef SYS_ify
++#define SYS_ify(syscall_name) __NR_##syscall_name
++
++#ifdef __ASSEMBLER__
++
++/* We intentionally keep the assembler side minimal for bring-up. */
++
++#define ENTRY(name)            \
++  .globl name;                \
++  .type  name, @function;     \
++name:
++
++#define END(name)              \
++  .size name, .-name
++
++#define L(label) .L##label
++
++/* System call wrapper helper.
++   TODO: once Linx has a dedicated syscall instruction, use it. */
++#undef PSEUDO
++#define PSEUDO(name, syscall_name, args)                        \
++  .text;                                                        \
++  .align 2;                                                     \
++  ENTRY (name);                                                 \
++  /* a7 = syscall number */                                     \
++  addiw zero, SYS_ify (syscall_name), ->a7;                     \
++  ebreak 15;                                                    \
++  /* errors are returned as -errno in a0 */                     \
++  addiw zero, -4096, ->a7;                                      \
++  /* if a0 > -4096 then error */                                \
++  bgtu a0, a7, .Lsyscall_error##name;
++
++#undef PSEUDO_END
++#define PSEUDO_END(name)                                        \
++.Lsyscall_error##name:                                          \
++  /* Tail-call to generic handler in libc. */                   \
++  j __syscall_error;                                            \
++  END (name)
++
++#undef PSEUDO_NOERRNO
++#define PSEUDO_NOERRNO(name, syscall_name, args)                \
++  .text;                                                        \
++  .align 2;                                                     \
++  ENTRY (name);                                                 \
++  addiw zero, SYS_ify (syscall_name), ->a7;                     \
++  ebreak 15;
++
++#undef PSEUDO_END_NOERRNO
++#define PSEUDO_END_NOERRNO(name) END (name)
++
++#undef PSEUDO_ERRVAL
++#define PSEUDO_ERRVAL(name, syscall_name, args)                 \
++  PSEUDO_NOERRNO (name, syscall_name, args)                     \
++  neg a0, a0;
++
++#undef PSEUDO_END_ERRVAL
++#define PSEUDO_END_ERRVAL(name) END (name)
++
++#undef ret_NOERRNO
++#define ret_NOERRNO ret
++#undef ret_ERRVAL
++#define ret_ERRVAL ret
++
++#else /* !__ASSEMBLER__ */
++
++#define HAVE_INTERNAL_BRK_ADDR_SYMBOL 1
++
++#define INTERNAL_SYSCALL(name, nr, args...) \
++  internal_syscall##nr (SYS_ify (name), args)
++
++#define INTERNAL_SYSCALL_NCS(number, nr, args...) \
++  internal_syscall##nr (number, args)
++
++/* LinxISA uses `ebreak 15` for bring-up syscalls. */
++#define __SYSCALL_INSN "ebreak 15\n\t"
++#define __SYSCALL_CLOBBERS "memory"
++
++#define internal_syscall0(number, dummy...)                             \
++({                                                                      \
++  long int _sys_result;                                                 \
++  {                                                                     \
++    register long int __a7 asm ("a7") = (number);                       \
++    register long int __a0 asm ("a0");                                  \
++    __asm__ volatile (__SYSCALL_INSN                                    \
++                      : "=r" (__a0)                                     \
++                      : "r" (__a7)                                      \
++                      : __SYSCALL_CLOBBERS);                            \
++    _sys_result = __a0;                                                 \
++  }                                                                     \
++  _sys_result;                                                          \
++})
++
++#define internal_syscall1(number, arg0)                                 \
++({                                                                      \
++  long int _sys_result;                                                 \
++  long int _arg0 = (long int) (arg0);                                   \
++  {                                                                     \
++    register long int __a7 asm ("a7") = (number);                       \
++    register long int __a0 asm ("a0") = _arg0;                          \
++    __asm__ volatile (__SYSCALL_INSN                                    \
++                      : "+r" (__a0)                                     \
++                      : "r" (__a7)                                      \
++                      : __SYSCALL_CLOBBERS);                            \
++    _sys_result = __a0;                                                 \
++  }                                                                     \
++  _sys_result;                                                          \
++})
++
++#define internal_syscall2(number, arg0, arg1)                           \
++({                                                                      \
++  long int _sys_result;                                                 \
++  long int _arg0 = (long int) (arg0);                                   \
++  long int _arg1 = (long int) (arg1);                                   \
++  {                                                                     \
++    register long int __a7 asm ("a7") = (number);                       \
++    register long int __a0 asm ("a0") = _arg0;                          \
++    register long int __a1 asm ("a1") = _arg1;                          \
++    __asm__ volatile (__SYSCALL_INSN                                    \
++                      : "+r" (__a0)                                     \
++                      : "r" (__a7), "r" (__a1)                          \
++                      : __SYSCALL_CLOBBERS);                            \
++    _sys_result = __a0;                                                 \
++  }                                                                     \
++  _sys_result;                                                          \
++})
++
++#define internal_syscall3(number, arg0, arg1, arg2)                     \
++({                                                                      \
++  long int _sys_result;                                                 \
++  long int _arg0 = (long int) (arg0);                                   \
++  long int _arg1 = (long int) (arg1);                                   \
++  long int _arg2 = (long int) (arg2);                                   \
++  {                                                                     \
++    register long int __a7 asm ("a7") = (number);                       \
++    register long int __a0 asm ("a0") = _arg0;                          \
++    register long int __a1 asm ("a1") = _arg1;                          \
++    register long int __a2 asm ("a2") = _arg2;                          \
++    __asm__ volatile (__SYSCALL_INSN                                    \
++                      : "+r" (__a0)                                     \
++                      : "r" (__a7), "r" (__a1), "r" (__a2)              \
++                      : __SYSCALL_CLOBBERS);                            \
++    _sys_result = __a0;                                                 \
++  }                                                                     \
++  _sys_result;                                                          \
++})
++
++#define internal_syscall4(number, arg0, arg1, arg2, arg3)               \
++({                                                                      \
++  long int _sys_result;                                                 \
++  long int _arg0 = (long int) (arg0);                                   \
++  long int _arg1 = (long int) (arg1);                                   \
++  long int _arg2 = (long int) (arg2);                                   \
++  long int _arg3 = (long int) (arg3);                                   \
++  {                                                                     \
++    register long int __a7 asm ("a7") = (number);                       \
++    register long int __a0 asm ("a0") = _arg0;                          \
++    register long int __a1 asm ("a1") = _arg1;                          \
++    register long int __a2 asm ("a2") = _arg2;                          \
++    register long int __a3 asm ("a3") = _arg3;                          \
++    __asm__ volatile (__SYSCALL_INSN                                    \
++                      : "+r" (__a0)                                     \
++                      : "r" (__a7), "r" (__a1), "r" (__a2), "r" (__a3)  \
++                      : __SYSCALL_CLOBBERS);                            \
++    _sys_result = __a0;                                                 \
++  }                                                                     \
++  _sys_result;                                                          \
++})
++
++#define internal_syscall5(number, arg0, arg1, arg2, arg3, arg4)         \
++({                                                                      \
++  long int _sys_result;                                                 \
++  long int _arg0 = (long int) (arg0);                                   \
++  long int _arg1 = (long int) (arg1);                                   \
++  long int _arg2 = (long int) (arg2);                                   \
++  long int _arg3 = (long int) (arg3);                                   \
++  long int _arg4 = (long int) (arg4);                                   \
++  {                                                                     \
++    register long int __a7 asm ("a7") = (number);                       \
++    register long int __a0 asm ("a0") = _arg0;                          \
++    register long int __a1 asm ("a1") = _arg1;                          \
++    register long int __a2 asm ("a2") = _arg2;                          \
++    register long int __a3 asm ("a3") = _arg3;                          \
++    register long int __a4 asm ("a4") = _arg4;                          \
++    __asm__ volatile (__SYSCALL_INSN                                    \
++                      : "+r" (__a0)                                     \
++                      : "r" (__a7), "r" (__a1), "r" (__a2), "r" (__a3), \
++                        "r" (__a4)                                      \
++                      : __SYSCALL_CLOBBERS);                            \
++    _sys_result = __a0;                                                 \
++  }                                                                     \
++  _sys_result;                                                          \
++})
++
++#define internal_syscall6(number, arg0, arg1, arg2, arg3, arg4, arg5)   \
++({                                                                      \
++  long int _sys_result;                                                 \
++  long int _arg0 = (long int) (arg0);                                   \
++  long int _arg1 = (long int) (arg1);                                   \
++  long int _arg2 = (long int) (arg2);                                   \
++  long int _arg3 = (long int) (arg3);                                   \
++  long int _arg4 = (long int) (arg4);                                   \
++  long int _arg5 = (long int) (arg5);                                   \
++  {                                                                     \
++    register long int __a7 asm ("a7") = (number);                       \
++    register long int __a0 asm ("a0") = _arg0;                          \
++    register long int __a1 asm ("a1") = _arg1;                          \
++    register long int __a2 asm ("a2") = _arg2;                          \
++    register long int __a3 asm ("a3") = _arg3;                          \
++    register long int __a4 asm ("a4") = _arg4;                          \
++    register long int __a5 asm ("a5") = _arg5;                          \
++    __asm__ volatile (__SYSCALL_INSN                                    \
++                      : "+r" (__a0)                                     \
++                      : "r" (__a7), "r" (__a1), "r" (__a2), "r" (__a3), \
++                        "r" (__a4), "r" (__a5)                          \
++                      : __SYSCALL_CLOBBERS);                            \
++    _sys_result = __a0;                                                 \
++  }                                                                     \
++  _sys_result;                                                          \
++})
++
++extern long int __syscall_error (long int neg_errno);
++
++#endif /* !__ASSEMBLER__ */
++
++#endif /* _LINUX_LINX_SYSDEP_H */
++

@@ -32,7 +32,7 @@ COMMON_FLAGS=(
   -fno-exceptions
   -fno-rtti
   -nostdlib
-  -I"$ROOT/toolchain/pto/include"
+  -I"$ROOT/tools/pto/include"
 )
 
 compile_one() {
@@ -169,7 +169,7 @@ if [[ "${RUN_QEMU_TILE:-1}" == "1" ]]; then
   if [[ -n "$QEMU_BIN" && -x "$QEMU_BIN" ]]; then
     QEMU_ARGS+=(--qemu "$QEMU_BIN")
   fi
-  CLANG="$CLANG_C" CLANGXX="$CXX" python3 "$ROOT/tests/qemu/run_tests.py" \
+  CLANG="$CLANG_C" CLANGXX="$CXX" python3 "$ROOT/avs/qemu/run_tests.py" \
     --suite tile --timeout "${QEMU_TIMEOUT:-60}" \
     "${QEMU_ARGS[@]}" \
     --require-test-id 0x000A0001 \

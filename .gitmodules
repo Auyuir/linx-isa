@@ -8,6 +8,15 @@
 [submodule "emulator/qemu"]
 	path = emulator/qemu
 	url = git@github.com:LinxISA/qemu.git
-[submodule "models/pyCircuit"]
-	path = models/pyCircuit
-	url = git@github.com:zhoubot/pyCircuit.git
+[submodule "tools/pyCircuit"]
+	path = tools/pyCircuit
+	url = git@github.com:LinxISA/pyCircuit.git
+[submodule "lib/glibc"]
+	path = lib/glibc
+	url = git@github.com:LinxISA/glibc.git
+[submodule "lib/musl"]
+	path = lib/musl
+	url = git@github.com:LinxISA/musl.git
+[submodule "rtl/LinxCore"]
+	path = rtl/LinxCore
+	url = git@github.com:LinxISA/LinxCore.git

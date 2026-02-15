@@ -1,21 +1,25 @@
 # Phase 3: Emulator (QEMU) Bring-up
 
-QEMU integration is in sibling repo `~/qemu` (`linx64-softmmu`, machine type `virt`).
+QEMU implementation source of truth is the submodule:
+
+- `emulator/qemu/`
+
+Linx patch lineage is maintained in the LinxISA QEMU fork history, then pinned here via submodule SHA.
 
 ## Basic flow
 
-1. Compile C to Linx relocatable object (`.o`, ET_REL)
-2. Run with `qemu-system-linx64 -machine virt -kernel <obj.o>`
-3. Validate output and exit status
+1. Build Linx test object/executable.
+2. Run with `qemu-system-linx64 -machine virt -kernel <image>`.
+3. Validate output and exit status through AVS suites.
 
 ## Test entrypoints
 
 ```bash
 # Default suites
-./tests/qemu/run_tests.sh
+./avs/qemu/run_tests.sh
 
 # Full suites
-./tests/qemu/run_tests.sh --all --timeout 20
+./avs/qemu/run_tests.sh --all --timeout 20
 ```
 
 ## Conventions

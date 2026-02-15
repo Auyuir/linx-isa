@@ -3,18 +3,21 @@
 Project-wide documentation organized by purpose:
 
 - `docs/architecture/`
-  - ISA manual and architecture-level references.
+  - ISA manual and architecture references.
 - `docs/bringup/`
-  - Bring-up status, onboarding, phased plans (`docs/bringup/phases/`), and contracts.
+  - Bring-up status, onboarding, phased plans, and contracts.
 - `docs/reference/`
-  - Examples and reference snippets.
+  - Public examples and generated references.
 - `docs/project/`
-  - Repository and development flow notes.
+  - Repository flow and navigation policy.
+- `docs/migration/`
+  - Path migration maps.
 
 Key entrypoints:
 
 - Bring-up onboarding: `docs/bringup/GETTING_STARTED.md`
-- Bring-up hierarchy: `docs/bringup/README.md`
 - Bring-up progress tracker: `docs/bringup/PROGRESS.md`
+- AVS matrix: `avs/matrix_v1.md`
 - ISA manual: `docs/architecture/isa-manual/README.md`
-- Canonical disassembly example: `examples/assembly/v0.3/curated/disasm_example.s`
+- Canonical sample pack: `docs/reference/examples/v0.3/`
+- Navigation guide: `docs/project/navigation.md`

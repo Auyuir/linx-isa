@@ -23,8 +23,12 @@ while IFS= read -r p; do
       echo "::warning file=$p::Compatibility shim path touched. Use canonical spec/isa paths."
       warned=1
       ;;
-    avs/*)
-      echo "::warning file=$p::Compatibility shim path touched. Use canonical docs/validation/avs paths."
+    docs/validation/avs/*)
+      echo "::warning file=$p::Legacy AVS path touched. Use canonical avs/ paths."
+      warned=1
+      ;;
+    tests/*)
+      echo "::warning file=$p::Legacy tests path touched. Use canonical avs/ paths."
       warned=1
       ;;
   esac

@@ -1,10 +1,10 @@
 # Generated test artifacts
-compiler/llvm/tests/out/
-compiler/llvm/tests/out-linx32/
-compiler/llvm/tests/out-linx64/
+avs/compiler/linx-llvm/tests/out/
+avs/compiler/linx-llvm/tests/out-linx32/
+avs/compiler/linx-llvm/tests/out-linx64/
 
 # QEMU unit test outputs
-tests/qemu/out/
+avs/qemu/out/
 
 # Common build outputs (keep binaries out of git)
 *.o
@@ -16,6 +16,9 @@ tests/qemu/out/
 *.bin
 *.tmp
 *.log
+
+# Linx libc bring-up outputs
+out/libc/
 
 # Local debug scratch
 qemu_debug.txt
@@ -43,7 +46,7 @@ docs/architecture/isa-manual/vendor/
 docs/architecture/isa-manual/.bundle/
 
 # ctuning milepost runner outputs
-tools/ctuning/out/
+workloads/benchmarks/ctuning/out/
 
 # PTO bridge example outputs (generated)
 tools/pto/out/
@@ -55,4 +58,4 @@ workloads/benchmarks/third_party/
 workloads/benchmarks/**/docs/html/
 
 # ctuning scratch (non-source)
-tools/ctuning/out_single/
+workloads/benchmarks/ctuning/out_single/

@@ -1,27 +1,25 @@
 # LinxISA Bring-up Getting Started
 
-This guide is the entry point for contributors joining the public LinxISA bring-up project.
+This guide is the entry point for contributors joining the LinxISA bring-up workspace.
 
 ## 1. Prerequisites
 
 Required:
 
-- `git` (with SSH access to GitHub)
+- `git` (with GitHub SSH access)
 - `python3`
-- `clang` + `ld.lld` (LinxISA-enabled toolchain build)
-- Ruby/Bundler stack only if rebuilding the ISA manual PDF
+- `clang` + `ld.lld` for Linx cross builds
 
 Recommended:
 
-- `gh` (GitHub CLI) for PR/release workflows
+- `gh` (GitHub CLI)
 
-## 2. Clone the Workspace with Submodules
-
-The bring-up flow uses pinned submodules for external implementation repos.
+## 2. Clone with Submodules
 
 ```bash
 git clone --recurse-submodules git@github.com:LinxISA/linx-isa.git
 cd linx-isa
+git submodule sync --recursive
 git submodule update --init --recursive
 ```
 
@@ -30,68 +28,60 @@ Submodule map:
 - `compiler/llvm` -> `LinxISA/llvm-project`
 - `emulator/qemu` -> `LinxISA/qemu`
 - `kernel/linux` -> `LinxISA/linux`
-- `models/pyCircuit` -> `zhoubot/pyCircuit` (temporary until `LinxISA/pyCircuit` transfer is complete)
+- `rtl/LinxCore` -> `LinxISA/LinxCore`
+- `tools/pyCircuit` -> `LinxISA/pyCircuit`
+- `lib/glibc` -> `LinxISA/glibc`
+- `lib/musl` -> `LinxISA/musl`
 
-If you already cloned `linx-isa` before submodules were added:
+## 3. Validate Baseline
 
-```bash
-git submodule sync --recursive
-git submodule update --init --recursive
-```
-
-## 3. Verify a Baseline Bring-up Environment
-
-Run the public regression gate from repo root:
+From repo root:
 
 ```bash
 bash tools/regression/run.sh
 ```
 
-If tools are not on default paths, set overrides:
+Optional overrides:
 
 ```bash
 export CLANG=~/llvm-project/build-linxisa-clang/bin/clang
 export LLD=~/llvm-project/build-linxisa-clang/bin/ld.lld
-export QEMU=~/linx-isa/emulator/qemu/build-tci/qemu-system-linx64
+export QEMU=~/qemu/build-tci/qemu-system-linx64
 bash tools/regression/run.sh
 ```
 
-Run the architecture contract gate:
+Run contract gate:
 
 ```bash
 python3 tools/bringup/check26_contract.py --root .
 ```
 
-## 4. Daily Contributor Workflow
+## 4. Daily Workflow
 
-1. Pick a bring-up area from `docs/bringup/phases/`.
-2. Implement changes in the relevant repo (`linx-isa` or one of the domain submodules).
-3. Run local validation (at minimum: changed tests + `check26` gate).
-4. Open PRs in upstream repos first when submodule content changes (`llvm-project`, `qemu`, `linux`, `pyCircuit`).
-5. Update submodule pointers in `linx-isa` only after upstream commits are merged.
+1. Pick a scope under `docs/bringup/phases/`.
+2. Implement in the relevant submodule/repo first.
+3. Run AVS + regression gates locally.
+4. Merge upstream in ecosystem repos.
+5. Bump submodule SHAs in `linx-isa`.
 
-Update submodule pointers after upstream merge:
-
-```bash
-git submodule update --remote compiler/llvm emulator/qemu kernel/linux models/pyCircuit
-git add .gitmodules compiler/llvm emulator/qemu kernel/linux models/pyCircuit
-git commit -m "chore(submodules): bump bring-up dependencies"
-```
-
-## 5. pyCircuit URL Migration (When Org Transfer Completes)
-
-When `LinxISA/pyCircuit` is published, switch URL in your local clone:
+Submodule bump command:
 
 ```bash
-git submodule set-url models/pyCircuit git@github.com:LinxISA/pyCircuit.git
-git submodule sync --recursive
-git submodule update --init models/pyCircuit
+git submodule update --remote compiler/llvm emulator/qemu kernel/linux rtl/LinxCore tools/pyCircuit lib/glibc lib/musl
+git add .gitmodules compiler/llvm emulator/qemu kernel/linux rtl/LinxCore tools/pyCircuit lib/glibc lib/musl
+git commit -m "chore(submodules): bump ecosystem revisions"
 ```
 
-Then commit the `.gitmodules` URL update in `linx-isa`.
+## 5. Canonical Paths
 
-## 6. Where to Coordinate
+- AVS runtime tests: `avs/qemu/`
+- AVS compile tests: `avs/compiler/linx-llvm/tests/`
+- Freestanding libc support used by AVS: `tools/libc/freestanding/`
+- Assembly sample pack: `docs/reference/examples/v0.3/`
 
-- Bring-up status and completion criteria: `docs/bringup/PROGRESS.md`
-- Contract and architecture checkpoints: `docs/bringup/CHECK26_CONTRACT.md`
-- Path migration notes: `docs/migration/path-map-v0.3.1.md`
+## 6. Coordination References
+
+- Bring-up progress: `docs/bringup/PROGRESS.md`
+- Contract checkpoint: `docs/bringup/CHECK26_CONTRACT.md`
+- Migration map: `docs/migration/path-map-v0.4.0.md`
+- Navigation guide: `docs/project/navigation.md`

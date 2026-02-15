@@ -9,3 +9,4 @@ Ordered bring-up phase plans:
 5. `docs/bringup/phases/05_fpga_zybo_z7.md`
 6. `docs/bringup/phases/06_linux_on_janus.md`
 7. `docs/bringup/phases/07_toolchain_glibc.md`
+8. `docs/bringup/phases/08_toolchain_musl.md`

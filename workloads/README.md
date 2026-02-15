@@ -3,38 +3,24 @@
 Unified home for runnable workload content:
 
 - `benchmarks/` - benchmark suites and runner scripts.
-- `examples/` - standalone example programs.
-- `generated/` - generated artifacts from workload runs (objdump, binaries, logs, reports).
+- `generated/` - generated artifacts from workload runs.
 
-Run benchmark workloads:
+## Primary runners
 
-```bash
-python3 workloads/benchmarks/run_benchmarks.py
-```
-
-Run the PTO AI kernel bring-up benchmark flow (auto-mode GEMM + flash-attention):
+Build CoreMark + Dhrystone (explicit cross target):
 
 ```bash
-python3 workloads/benchmarks/run_pto_ai_kernels.py
+python3 workloads/benchmarks/run_benchmarks.py --cc /path/to/clang --target <triple>
 ```
 
-Run PTO CPU sim + Linx QEMU checksum matching for GEMM/flash:
+Build PolyBench kernels (explicit cross target):
 
 ```bash
-python3 workloads/benchmarks/compare_pto_cpu_qemu.py
+python3 workloads/benchmarks/run_polybench.py --cc /path/to/clang --target <triple> --kernels gemm,jacobi-2d
 ```
 
-Run TSVC on Linx QEMU:
+Run consolidated portfolio:
 
 ```bash
-python3 workloads/benchmarks/run_tsvc.py
+python3 workloads/benchmarks/run_portfolio.py --cc /path/to/clang --target <triple>
 ```
-
-Primary codegen-quality artifacts:
-
-- `workloads/generated/objdump/`
-- `workloads/generated/report.md`
-- `workloads/generated/objdump/pto_ai/`
-- `workloads/generated/pto_ai_report.md`
-- `workloads/generated/pto_qemu_value_match.md`
-- `workloads/generated/tsvc_report.md`

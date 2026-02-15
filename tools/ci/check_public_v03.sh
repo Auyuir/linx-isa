@@ -28,9 +28,9 @@ if rg -n \
   --glob '!docs/architecture/isa-manual/src/chapters/98_changelog.adoc' \
   --glob '!tools/isa/check_no_legacy_v02.py' \
   --glob '!tools/ci/check_public_v03.sh' \
-  --glob '!compiler/linx-llvm/tests/out-*/**' \
+  --glob '!avs/compiler/linx-llvm/tests/out-*/**' \
   'linxisa-v0\.[12]\.json' \
-  README.md docs compiler emulator kernel models rtl toolchain spec tools tests
+  README.md docs avs compiler emulator kernel rtl lib spec tools workloads
 then
   echo "error: found forbidden runtime/public references to removed v0.1/v0.2 catalogs" >&2
   exit 1

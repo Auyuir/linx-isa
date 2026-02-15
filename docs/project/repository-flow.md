@@ -1,28 +1,29 @@
-# LinxISA Repository Flow (v0.3+)
+# LinxISA Repository Flow (v0.4)
 
-The repository is organized around a spec-first flow where implementation tracks consume the same v0.3 ISA catalog.
+The workspace is specification-first and submodule-first.
 
 ## Workspace Bootstrap
-
-Before working on bring-up, initialize dependency submodules:
 
 ```bash
 git submodule sync --recursive
 git submodule update --init --recursive
 ```
 
-Pinned dependency repos are domain-scoped:
+Pinned ecosystem repos:
 
 - `compiler/llvm`
 - `emulator/qemu`
 - `kernel/linux`
-- `models/pyCircuit`
+- `rtl/LinxCore`
+- `tools/pyCircuit`
+- `lib/glibc`
+- `lib/musl`
 
 ## Flow
 
 1. ISA definition in `spec/isa/golden/v0.3/`
 2. Compiled catalog in `spec/isa/spec/current/linxisa-v0.3.json`
 3. Generated decode assets in `spec/isa/generated/codecs/`
-4. In-repo implementation integration under `compiler/`, `emulator/`, `models/`, `rtl/`, `toolchain/`
-5. Cross-repo alignment through domain submodules
-6. Validation through `tools/regression/run.sh` and `tools/bringup/check26_contract.py`
+4. Validation in AVS (`avs/`)
+5. Cross-repo alignment through submodule pinning
+6. Regression gating with `tools/regression/run.sh`

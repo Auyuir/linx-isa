@@ -25,7 +25,7 @@ Comparable to Arm/x86/RISC-V maturity means:
   - `python3 tools/isa/report_encoding_space.py --check`
   - Report: `docs/reference/encoding_space_report.md`
 - LLVM backend has full mnemonic disassembly coverage when using the per-target outputs:
-  - `python3 compiler/linx-llvm/tests/analyze_coverage.py --out-dir compiler/linx-llvm/tests/out-linx64 --fail-under 100`
+  - `python3 avs/compiler/linx-llvm/tests/analyze_coverage.py --out-dir avs/compiler/linx-llvm/tests/out-linx64 --fail-under 100`
 - Benchmark harness exists with static and dynamic instruction statistics:
   - `python3 workloads/benchmarks/run_benchmarks.py --dynamic-hist`
 
@@ -75,11 +75,11 @@ Comparable to Arm/x86/RISC-V maturity means:
 - Object/relocation model:
   - ET_DYN/dynamic linking is not yet a bring-up gate; relocation coverage must be
     expanded before hosted workloads (LLVM test-suite) can run.
-  - Evidence: `compiler/linx-llvm/tests/run.sh` has PIC relocation checks, shared-lib gated.
+  - Evidence: `avs/compiler/linx-llvm/tests/run.sh` has PIC relocation checks, shared-lib gated.
 
 - Disasm coverage gate ergonomics:
-  - Stale `compiler/linx-llvm/tests/out/` directories can cause false failures if used.
-  - Mitigation: `compiler/linx-llvm/tests/analyze_coverage.py` auto-detects `out-linx*`.
+  - Stale `avs/compiler/linx-llvm/tests/out/` directories can cause false failures if used.
+  - Mitigation: `avs/compiler/linx-llvm/tests/analyze_coverage.py` auto-detects `out-linx*`.
 
 ## Gaps: Emulator (QEMU)
 
@@ -98,8 +98,8 @@ Comparable to Arm/x86/RISC-V maturity means:
   - Matrix: `avs/matrix_v1.md`
   - Machine-readable: `avs/linx_avs_v1_test_matrix.yaml`
   - Required work:
-    - Implement runtime tests under `tests/qemu/`
-    - Implement compile-only / MC tests under `compiler/linx-llvm/tests/`
+    - Implement runtime tests under `avs/qemu/`
+    - Implement compile-only / MC tests under `avs/compiler/linx-llvm/tests/`
 
 ## Gaps: Benchmark Portfolio
 
