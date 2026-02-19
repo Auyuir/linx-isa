@@ -52,6 +52,16 @@ __asm__(
     "  v.sw.brg vt#1, [ri1, lc0<<2, zero]\n"
     "  C.BSTOP\n");
 
+__asm__(
+    ".p2align 3\n"
+    ".globl __linx_v03_simt_ri_order_body\n"
+    "__linx_v03_simt_ri_order_body:\n"
+    "  v.add zero, ri6, ->vt.w\n"
+    "  v.sw.brg vt#1, [ri0, zero, zero]\n"
+    "  v.add zero, ri7, ->vt.w\n"
+    "  v.sw.brg vt#1, [ri0, ri1, zero]\n"
+    "  C.BSTOP\n");
+
 /* Empty decoupled body used by typed block-start smoke tests. */
 __asm__(
     ".p2align 2\n"
@@ -246,6 +256,46 @@ static void test_mseq_simt_f32_smoke(void)
     }
 }
 
+static void test_mseq_ri_order_guard(void)
+{
+    static uint32_t out[2];
+    out[0] = 0xDEADBEEFu;
+    out[1] = 0xDEADBEEFu;
+
+    const uint64_t out_base = (uint64_t)(uintptr_t)&out[0];
+    const uint64_t out_stride = 4u;
+    const uint64_t filler2 = 0x11112222u;
+    const uint64_t filler3 = 0x33334444u;
+    const uint64_t filler4 = 0x55556666u;
+    const uint64_t filler5 = 0x77778888u;
+    const uint64_t expect_ri6 = 0x10203040u;
+    const uint64_t expect_ri7 = 0x50607080u;
+    const uint64_t filler8 = 0x90A0B0C0u;
+
+    /*
+     * Ordered RI stream is formed as (src1, src0, src2) with reg==zero skipped.
+     * This layout intentionally uses zero-source holes before descriptor 4 so
+     * ri6/ri7 map to descriptor-4 src1/src0.
+     */
+    __asm__ volatile(
+        "BSTART.MSEQ 0\n"
+        "B.TEXT __linx_v03_simt_ri_order_body\n"
+        "B.IOR [%0, %1],[zero]\n"
+        "B.IOR [zero, %2],[%3]\n"
+        "B.IOR [%4, zero],[%5]\n"
+        "B.IOR [%6, %7],[%8]\n"
+        "C.B.DIMI 1, ->lb0\n"
+        "C.BSTART\n"
+        :
+        : "r"(out_base), "r"(out_stride), "r"(filler2), "r"(filler3),
+          "r"(filler4), "r"(filler5), "r"(expect_ri6), "r"(expect_ri7),
+          "r"(filler8)
+        : "memory");
+
+    TEST_EQ32(out[0], (uint32_t)expect_ri6, 0x1240);
+    TEST_EQ32(out[1], (uint32_t)expect_ri7, 0x1241);
+}
+
 void run_v03_vector_tile_tests(void)
 {
     test_start(0x1200);
@@ -280,6 +330,13 @@ void run_v03_vector_tile_tests(void)
     uart_puts("v0.3 MSEQ SIMT f32 smoke ... ");
 
     test_mseq_simt_f32_smoke();
+
+    test_pass();
+
+    test_start(0x1240);
+    uart_puts("v0.3 MSEQ RI-order guard ... ");
+
+    test_mseq_ri_order_guard();
 
     test_pass();
 }

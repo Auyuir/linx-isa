@@ -64,7 +64,7 @@ fi
 CLANG="${CLANG:-}"
 LLD="${LLD:-}"
 QEMU="${QEMU:-}"
-TOOLCHAIN_LANE="${TOOLCHAIN_LANE:-external}" # external|pin|auto
+TOOLCHAIN_LANE="${TOOLCHAIN_LANE:-pin}" # external|pin|auto
 QEMU_LANE="${QEMU_LANE:-pin}" # external|pin|auto
 QEMU_ROOT="${QEMU_ROOT:-}"
 LINX_EMU_DISABLE_TIMER_IRQ="${LINX_EMU_DISABLE_TIMER_IRQ:-0}" # keep strict/system timer IRQs enabled by default

@@ -13,7 +13,9 @@ assembly inspection.
 
 ```bash
 python3 workloads/tsvc/run_tsvc.py \
-  --clang /Users/zhoubot/llvm-project/build-linxisa-clang/bin/clang \
+  --clang /Users/zhoubot/linx-isa/compiler/llvm/build-linxisa-clang/bin/clang \
+  --qemu /Users/zhoubot/linx-isa/emulator/qemu/build/qemu-system-linx64 \
+  --source-policy linx-v03-parity \
   --vector-mode auto
 ```
 
@@ -26,3 +28,34 @@ Artifacts are written under `workloads/generated/`:
 - `reports/tsvc/vectorization_coverage.auto.{md,json}`
 - `reports/tsvc/vectorization_remarks.auto.json`
 - `reports/tsvc/vectorization_gap_plan.auto.json`
+- `reports/tsvc/gate_result.json` (canonical machine-readable gate artifact)
+
+## Optional checksum parity gate
+
+1. Build baseline:
+
+```bash
+python3 workloads/tsvc/run_tsvc.py \
+  --clang /Users/zhoubot/linx-isa/compiler/llvm/build-linxisa-clang/bin/clang \
+  --qemu /Users/zhoubot/linx-isa/emulator/qemu/build/qemu-system-linx64 \
+  --source-policy linx-v03-parity \
+  --vector-mode off
+```
+
+2. Run candidate with parity enforcement:
+
+```bash
+python3 workloads/tsvc/run_tsvc.py \
+  --clang /Users/zhoubot/linx-isa/compiler/llvm/build-linxisa-clang/bin/clang \
+  --qemu /Users/zhoubot/linx-isa/emulator/qemu/build/qemu-system-linx64 \
+  --source-policy linx-v03-parity \
+  --vector-mode auto \
+  --compare-baseline-log workloads/generated/qemu/tsvc/tsvc.off.stdout.txt \
+  --fail-on-checksum-mismatch
+```
+
+`--source-policy` controls staged-source behavior only:
+
+- `linx-v03-parity` (default): applies Linx v0.3 parity canonicalizations in staged
+  `tsvc.c` (currently `s2111` `/1.9 -> /1.9f`).
+- `upstream`: uses staged sources without parity canonicalization.

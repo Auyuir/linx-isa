@@ -11,7 +11,8 @@ from pathlib import Path
 
 
 _RE_FUNC = re.compile(r"^\s*([0-9a-fA-F]+)\s+<([^>]+)>:\s*$")
-_RE_BSTART_VEC = re.compile(r"(?i)\bbstart\.(?:mseq|mpar)\b")
+_RE_BSTART_MEM = re.compile(r"(?i)\bbstart\.(?:mseq|mpar)\b")
+_RE_BSTART_TILE = re.compile(r"(?i)\bbstart\.(?:vseq|vpar)\b")
 _RE_VEC_INSN = re.compile(r"(?i)\bv\.[a-z0-9_]+")
 _RE_BTEXT_TARGET = re.compile(r"(?i)\bb\.text\s+([A-Za-z0-9_.$]+)")
 
@@ -147,6 +148,33 @@ def _map_reason_to_gap_bucket(reason: str) -> str:
     return "other"
 
 
+def _to_bool(value: object, default: bool | None = None) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off"}:
+            return False
+    return default
+
+
+def _to_int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip(), 0)
+        except ValueError:
+            return default
+    return default
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description="Analyze TSVC auto-vectorization coverage (strict lowered-loop metric).")
     ap.add_argument("--objdump", required=True, help="Objdump text path")
@@ -190,7 +218,8 @@ def main(argv: list[str]) -> int:
             asm_by_kernel[kernel] = {
                 "kernel": kernel,
                 "resolved_symbol": None,
-                "has_vec_block": False,
+                "has_mem_block": False,
+                "has_tile_block": False,
                 "has_vec_insn": False,
                 "has_btext": False,
             }
@@ -202,7 +231,8 @@ def main(argv: list[str]) -> int:
         asm_by_kernel[kernel] = {
             "kernel": kernel,
             "resolved_symbol": resolved,
-            "has_vec_block": bool(_RE_BSTART_VEC.search(root_body)),
+            "has_mem_block": bool(_RE_BSTART_MEM.search(root_body)),
+            "has_tile_block": bool(_RE_BSTART_TILE.search(root_body)),
             "has_vec_insn": bool(_RE_VEC_INSN.search(body)),
             "has_btext": bool(_RE_BTEXT_TARGET.search(root_body)),
         }
@@ -251,11 +281,23 @@ def main(argv: list[str]) -> int:
             configured_mode = str(chosen.get("configured_mode", args.mode))
 
         asm = asm_by_kernel[kernel]
-        has_vec_block = bool(asm["has_vec_block"])
+        has_mem_block = bool(asm["has_mem_block"])
+        has_tile_block = bool(asm["has_tile_block"])
         has_vec_insn = bool(asm["has_vec_insn"])
         has_btext = bool(asm["has_btext"])
+        touches_memory = _to_bool(chosen.get("touches_memory") if chosen else None, None)
+        if touches_memory is True:
+            has_expected_header = has_mem_block
+            expected_header_kind = "mseq_or_mpar"
+        elif touches_memory is False:
+            has_expected_header = has_tile_block
+            expected_header_kind = "vseq_or_vpar"
+        else:
+            has_expected_header = has_mem_block or has_tile_block
+            expected_header_kind = "any_vector_header"
+        has_any_header = has_mem_block or has_tile_block
         has_strict_lowering_reason = status == "lowered" and reason.startswith("lowered_vblock")
-        strict_vectorized = has_strict_lowering_reason and has_vec_block and has_vec_insn and has_btext
+        strict_vectorized = has_strict_lowering_reason and has_expected_header and has_vec_insn and has_btext
 
         if strict_vectorized:
             vectorized.append(kernel)
@@ -273,10 +315,22 @@ def main(argv: list[str]) -> int:
                 "bucket": bucket,
                 "configured_mode": configured_mode,
                 "selected_mode": selected_mode,
+                "lane_count": _to_int(chosen.get("lane_count", 0)) if chosen else 0,
+                "group_count": _to_int(chosen.get("group_count", 0)) if chosen else 0,
+                "force_scalar_lane": bool(_to_bool(chosen.get("force_scalar_lane", False), False)) if chosen else False,
+                "has_recurrence": bool(_to_bool(chosen.get("has_recurrence", False), False)) if chosen else False,
+                "header_kind": str(chosen.get("header_kind", "")) if chosen else "",
+                "touches_memory": touches_memory,
+                "tripcount_source": str(chosen.get("tripcount_source", "")) if chosen else "",
+                "address_model": str(chosen.get("address_model", "")) if chosen else "",
                 "loop_rows_total": len(linked_rows),
                 "lowered_loops": len(lowered_rows),
                 "reject_loops": len(reject_rows),
-                "asm_has_vec_block": has_vec_block,
+                "asm_has_any_vector_header": has_any_header,
+                "asm_has_mem_header": has_mem_block,
+                "asm_has_tile_header": has_tile_block,
+                "asm_header_expected_kind": expected_header_kind,
+                "asm_header_matches_policy": has_expected_header,
                 "asm_has_btext": has_btext,
                 "asm_has_vec_insn": has_vec_insn,
                 "strict_vectorized": strict_vectorized,
@@ -293,7 +347,8 @@ def main(argv: list[str]) -> int:
         "metric": "strict_lowered_loops",
         "metric_description": (
             "Vectorized iff remarks report lowered_vblock* and disassembly has "
-            "BSTART.MSEQ/MPAR + B.TEXT + reachable v.* body ops."
+            "policy-matched vector header (MSEQ/MPAR for memory loops, "
+            "VSEQ/VPAR for tile-only loops) + B.TEXT + reachable v.* body ops."
         ),
         "total": total,
         "vectorized": vec_count,
@@ -335,6 +390,11 @@ def main(argv: list[str]) -> int:
                 "reason": str(row.get("reason", "reject_unknown")),
                 "configured_mode": str(row.get("configured_mode", args.mode)),
                 "selected_mode": str(row.get("selected_mode", "mseq")),
+                "header_kind": str(row.get("header_kind", "")),
+                "touches_memory": row.get("touches_memory"),
+                "lane_count": _to_int(row.get("lane_count", 0)),
+                "group_count": _to_int(row.get("group_count", 0)),
+                "force_scalar_lane": bool(_to_bool(row.get("force_scalar_lane", False), False)),
                 "loop_rows_total": int(row.get("loop_rows_total", 0)),
                 "next_action": _GAP_BUCKET_ACTIONS.get(bucket, "manual_triage"),
             }
@@ -366,7 +426,9 @@ def main(argv: list[str]) -> int:
         "## Strict metric",
         "- Requires both remark-level lowering and decoupled body assembly evidence:",
         "  - `reason` starts with `lowered_vblock`",
-        "  - root function has `BSTART.MSEQ`/`BSTART.MPAR` and `B.TEXT`",
+        "  - root function has policy-matched header and `B.TEXT`:",
+        "    - `touches_memory=true` -> `BSTART.MSEQ`/`BSTART.MPAR`",
+        "    - `touches_memory=false` -> `BSTART.VSEQ`/`BSTART.VPAR`",
         "  - `B.TEXT`-reachable body contains `v.*` operations",
     ]
     if missing_functions:

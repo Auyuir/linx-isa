@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -20,6 +21,7 @@ REPO_ROOT = WORKLOADS_DIR.parent
 GENERATED_DIR = WORKLOADS_DIR / "generated"
 
 ANALYZE_SCRIPT = TSVC_DIR / "analyze_tsvc_vectorization.py"
+COMPARE_SCRIPT = TSVC_DIR / "compare_tsvc_checksums.py"
 COMPAT_INCLUDE = TSVC_DIR / "include"
 FREESTANDING_INCLUDE = REPO_ROOT / "avs" / "runtime" / "freestanding" / "include"
 FREESTANDING_SRC = REPO_ROOT / "avs" / "runtime" / "freestanding" / "src"
@@ -30,6 +32,10 @@ FALLBACK_TSVC_SRC = WORKLOADS_DIR / "third_party" / "TSVC_2" / "src"
 
 _RE_TSVC_ROW = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s+(\S+)\s+(\S+)\s*$")
 _VECTOR_MODES = ("off", "mseq", "mpar", "auto")
+_SOURCE_POLICIES = ("linx-v03-parity", "upstream")
+_CANONICAL_ITERATIONS = 32
+_CANONICAL_LEN_1D = 320
+_CANONICAL_LEN_2D = 16
 
 
 @dataclass(frozen=True)
@@ -47,6 +53,7 @@ class ModeArtifacts:
     gap_plan_json: Path
     vectorized_kernels: int
     total_kernels: int
+    checksums: dict[str, str] | None
 
 
 def _run(cmd: list[str], *, cwd: Path | None = None, verbose: bool = False, **kwargs) -> subprocess.CompletedProcess[bytes]:
@@ -62,12 +69,58 @@ def _check_exe(path: Path, what: str) -> None:
         raise SystemExit(f"error: {what} not executable: {path}")
 
 
+def _git_head(path: Path) -> str | None:
+    p = _run(
+        ["git", "-C", str(path), "rev-parse", "HEAD"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if p.returncode != 0:
+        return None
+    return (p.stdout or b"").decode("utf-8", errors="replace").strip() or None
+
+
+def _build_sha_manifest() -> dict[str, str | None]:
+    roots = {
+        "linx_isa": REPO_ROOT,
+        "llvm": REPO_ROOT / "compiler" / "llvm",
+        "qemu": REPO_ROOT / "emulator" / "qemu",
+        "linux": REPO_ROOT / "kernel" / "linux",
+        "linxcore": REPO_ROOT / "rtl" / "LinxCore",
+        "pycircuit": REPO_ROOT / "tools" / "pyCircuit",
+        "glibc": REPO_ROOT / "lib" / "glibc",
+        "musl": REPO_ROOT / "lib" / "musl",
+    }
+    return {name: _git_head(path) if path.exists() else None for name, path in roots.items()}
+
+
+def _classify_lane(path: Path | None) -> str:
+    if path is None:
+        return "none"
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(REPO_ROOT)
+        return "pin"
+    except ValueError:
+        pass
+    home = Path.home().resolve()
+    if str(resolved).startswith(str(home)):
+        return "external"
+    return "custom"
+
+
 def _default_clang() -> Path | None:
     env = os.environ.get("CLANG")
     if env:
         return Path(os.path.expanduser(env))
-    cand = Path.home() / "llvm-project" / "build-linxisa-clang" / "bin" / "clang"
-    return cand if cand.exists() else None
+    candidates = [
+        REPO_ROOT / "compiler" / "llvm" / "build-linxisa-clang" / "bin" / "clang",
+        Path.home() / "llvm-project" / "build-linxisa-clang" / "bin" / "clang",
+    ]
+    for cand in candidates:
+        if cand.exists():
+            return cand
+    return None
 
 
 def _default_llvm_tool(clang: Path, tool: str) -> Path | None:
@@ -79,12 +132,15 @@ def _default_qemu() -> Path | None:
     env = os.environ.get("QEMU")
     if env:
         return Path(os.path.expanduser(env))
-    cand = Path.home() / "qemu" / "build" / "qemu-system-linx64"
-    cand_tci = Path.home() / "qemu" / "build-tci" / "qemu-system-linx64"
-    if cand.exists():
-        return cand
-    if cand_tci.exists():
-        return cand_tci
+    candidates = [
+        REPO_ROOT / "emulator" / "qemu" / "build" / "qemu-system-linx64",
+        REPO_ROOT / "emulator" / "qemu" / "build-tci" / "qemu-system-linx64",
+        Path.home() / "qemu" / "build" / "qemu-system-linx64",
+        Path.home() / "qemu" / "build-tci" / "qemu-system-linx64",
+    ]
+    for cand in candidates:
+        if cand.exists():
+            return cand
     return None
 
 
@@ -111,6 +167,73 @@ def _extract_kernel_names(tsvc_text: str) -> list[str]:
     return ordered
 
 
+def _find_function_span(c_text: str, func_name: str) -> tuple[int, int] | None:
+    m = re.search(rf"\b{re.escape(func_name)}\s*\([^)]*\)\s*\{{", c_text)
+    if not m:
+        return None
+    brace = c_text.find("{", m.start())
+    if brace < 0:
+        return None
+    depth = 0
+    for idx in range(brace, len(c_text)):
+        ch = c_text[idx]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return (m.start(), idx + 1)
+    return None
+
+
+def _canonicalize_s2111_divide_literals(tsvc_text: str) -> tuple[str, list[dict[str, object]]]:
+    span = _find_function_span(tsvc_text, "s2111")
+    if span is None:
+        raise SystemExit("error: failed to locate s2111 in staged TSVC source")
+    begin, end = span
+    fn_text = tsvc_text[begin:end]
+
+    canonicalizations: list[dict[str, object]] = []
+    rules = [
+        (
+            "s2111_divide_cast_literal",
+            re.compile(r"/\s*\(\s*(?:float|double|real_t)\s*\)\s*1\.9(?![0-9fF])"),
+            "/1.9f",
+        ),
+        (
+            "s2111_divide_cast_literal_nested",
+            re.compile(
+                r"/\s*\(\s*\(\s*(?:float|double|real_t)\s*\)\s*1\.9\s*\)(?![0-9fF])"
+            ),
+            "/1.9f",
+        ),
+        (
+            "s2111_divide_parenthesized_literal",
+            re.compile(r"/\s*\(\s*1\.9\s*\)(?![0-9fF])"),
+            "/1.9f",
+        ),
+        (
+            "s2111_divide_literal",
+            re.compile(r"/\s*1\.9(?![0-9fF])"),
+            "/1.9f",
+        ),
+    ]
+    for rule_name, pattern, repl in rules:
+        fn_text, count = pattern.subn(repl, fn_text)
+        if count:
+            canonicalizations.append(
+                {
+                    "function": "s2111",
+                    "rule": rule_name,
+                    "count": count,
+                }
+            )
+
+    if not canonicalizations:
+        return tsvc_text, []
+    return tsvc_text[:begin] + fn_text + tsvc_text[end:], canonicalizations
+
+
 def _resolve_tsvc_src(user_path: str | None) -> Path:
     if user_path:
         src = Path(os.path.expanduser(user_path)).resolve()
@@ -135,7 +258,8 @@ def _stage_tsvc_sources(
     len_1d: int,
     len_2d: int,
     kernel_regex: str | None,
-) -> list[str]:
+    source_policy: str,
+) -> tuple[list[str], list[dict[str, object]]]:
     if stage_dir.exists():
         shutil.rmtree(stage_dir)
     shutil.copytree(src_dir, stage_dir)
@@ -145,37 +269,43 @@ def _stage_tsvc_sources(
     common_text = _rewrite_macro(common_text, "iterations", iterations)
     common_text = _rewrite_macro(common_text, "LEN_1D", len_1d)
     common_text = _rewrite_macro(common_text, "LEN_2D", len_2d)
+    if "tsvc_runtime_iterations" not in common_text:
+        common_text += (
+            "\n"
+            "// Runtime macro helpers used to prevent compile-time loop deletion.\n"
+            "int tsvc_runtime_iterations(void);\n"
+            "int tsvc_runtime_len_1d(void);\n"
+        )
     common_h.write_text(common_text, encoding="utf-8")
+
+    common_c = stage_dir / "common.c"
+    common_c_text = common_c.read_text(encoding="utf-8")
+    if "tsvc_runtime_iterations" not in common_c_text:
+        common_c_text += (
+            "\n"
+            "__attribute__((noinline)) int tsvc_runtime_iterations(void) { return iterations; }\n"
+            "__attribute__((noinline)) int tsvc_runtime_len_1d(void) { return LEN_1D; }\n"
+        )
+        common_c.write_text(common_c_text, encoding="utf-8")
 
     tsvc_c = stage_dir / "tsvc.c"
     tsvc_text = tsvc_c.read_text(encoding="utf-8")
+    source_canonicalizations: list[dict[str, object]] = []
 
-    # Runtime guard list for known auto-vectorization miscompile/hang kernels.
-    # Keep these scalar until pass coverage closes the corresponding gaps.
-    runtime_guard_kernels = (
-        "s124",
-        "s161",
-        "s253",
-        "s271",
-        "s272",
-        "s273",
-        "s274",
-        "s278",
-        "s2711",
-        "s2712",
-        "s443",
-        "s4115",
-        "vif",
-        "s318",
+    # Note: we intentionally do not carry a hardcoded "runtime guard" list here.
+    # TSVC correctness is enforced via OFF-vs-AUTO checksum parity, not by
+    # optnone/noinline pinning of specific kernels.
+
+    # Keep TSVC kernels with 0-iteration bounds (e.g. s176 under the canonical
+    # bring-up profile where iterations/LEN_1D == 0) from being folded away
+    # before the Linx SIMT autovec pass runs.
+    s176_bound_pat = re.compile(r"4\s*\*\s*\(\s*iterations\s*/\s*LEN_1D\s*\)")
+    tsvc_text, n = s176_bound_pat.subn(
+        "4*(tsvc_runtime_iterations()/tsvc_runtime_len_1d())",
+        tsvc_text,
     )
-    for kernel_name in runtime_guard_kernels:
-        pattern = (
-            rf"(?m)^real_t\s+{re.escape(kernel_name)}\s*\(\s*struct\s+args_t\s*\*\s*func_args\s*\)"
-        )
-        repl = (
-            f"__attribute__((optnone,noinline)) real_t {kernel_name}(struct args_t * func_args)"
-        )
-        tsvc_text = re.sub(pattern, repl, tsvc_text, count=1)
+    if n != 1:
+        raise SystemExit(f"error: expected to patch exactly 1 s176 outer bound, got {n}")
 
     if "<stdint.h>" not in tsvc_text:
         tsvc_text = tsvc_text.replace(
@@ -208,6 +338,13 @@ def _stage_tsvc_sources(
     if n != 1:
         raise SystemExit(f"error: expected to patch exactly 1 time_function, got {n}")
 
+    if source_policy == "linx-v03-parity":
+        tsvc_text, source_canonicalizations = _canonicalize_s2111_divide_literals(
+            tsvc_text
+        )
+    elif source_policy != "upstream":
+        raise SystemExit(f"error: unsupported --source-policy: {source_policy}")
+
     kernels = _extract_kernel_names(tsvc_text)
     keep: set[str] | None = None
     if kernel_regex:
@@ -229,7 +366,7 @@ def _stage_tsvc_sources(
         kernels = [k for k in kernels if k in keep]
 
     tsvc_c.write_text(tsvc_text, encoding="utf-8")
-    return kernels
+    return kernels, source_canonicalizations
 
 
 def _mode_to_autovec(mode: str) -> str | None:
@@ -279,6 +416,7 @@ def _compile_c(
         "-target",
         target,
         "-O2",
+        "-fsingle-precision-constant",
         "-ffreestanding",
         "-fno-builtin",
         "-fno-stack-protector",
@@ -466,6 +604,41 @@ def _run_analyzer(
     return int(payload.get("vectorized", 0))
 
 
+def _run_checksum_compare(
+    *,
+    python: str,
+    baseline: Path,
+    candidate: Path,
+    kernel_list: Path,
+    json_out: Path,
+    report_out: Path,
+    fail_on_mismatch: bool,
+    verbose: bool,
+) -> dict[str, object]:
+    cmd = [
+        python,
+        str(COMPARE_SCRIPT),
+        "--baseline",
+        str(baseline),
+        "--candidate",
+        str(candidate),
+        "--kernel-list",
+        str(kernel_list),
+        "--json-out",
+        str(json_out),
+        "--report-out",
+        str(report_out),
+    ]
+    if fail_on_mismatch:
+        cmd.append("--fail-on-mismatch")
+    p = _run(cmd, verbose=verbose, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if p.returncode != 0:
+        sys.stderr.buffer.write(p.stdout or b"")
+        sys.stderr.buffer.write(p.stderr or b"")
+        raise SystemExit("error: TSVC checksum comparison failed")
+    return json.loads(json_out.read_text(encoding="utf-8"))
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description="Build TSVC for Linx, run on QEMU, and emit strict auto-vectorization reports.")
     ap.add_argument("--clang", default=None, help="Path to clang (env: CLANG)")
@@ -474,9 +647,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--qemu", default=None, help="Path to qemu-system-linx64 (env: QEMU)")
     ap.add_argument("--target", default="linx64-linx-none-elf", help="Target triple")
     ap.add_argument("--tsvc-src", default=None, help="TSVC source directory (expects common.h + tsvc.c)")
-    ap.add_argument("--iterations", type=int, default=32)
-    ap.add_argument("--len-1d", type=int, default=320)
-    ap.add_argument("--len-2d", type=int, default=16)
+    ap.add_argument("--iterations", type=int, default=_CANONICAL_ITERATIONS)
+    ap.add_argument("--len-1d", type=int, default=_CANONICAL_LEN_1D)
+    ap.add_argument("--len-2d", type=int, default=_CANONICAL_LEN_2D)
     ap.add_argument("--qemu-timeout", type=float, default=240.0, help="QEMU timeout (seconds)")
     ap.add_argument("--no-run-qemu", action="store_true", help="Skip QEMU execution (compile+objdump+analysis only)")
     ap.add_argument(
@@ -486,7 +659,34 @@ def main(argv: list[str]) -> int:
         help="Build mode (`all` runs off+mseq+mpar+auto).",
     )
     ap.add_argument("--kernel-regex", default=None, help="Only run kernels matching this regex.")
+    ap.add_argument(
+        "--source-policy",
+        choices=_SOURCE_POLICIES,
+        default="linx-v03-parity",
+        help="Staged source policy for parity gates.",
+    )
     ap.add_argument("--strict-fail-under", type=int, default=None, help="Fail if strict vectorized kernels are below this threshold.")
+    ap.add_argument(
+        "--lane-policy",
+        choices=("pin", "external", "auto", "custom"),
+        default="auto",
+        help="Explicit lane label for TSVC gate reporting.",
+    )
+    ap.add_argument(
+        "--compare-baseline-log",
+        default=None,
+        help="Optional baseline TSVC stdout log for checksum comparison.",
+    )
+    ap.add_argument(
+        "--checksum-report-json",
+        default=None,
+        help="Optional checksum comparison JSON output path.",
+    )
+    ap.add_argument(
+        "--fail-on-checksum-mismatch",
+        action="store_true",
+        help="Fail when checksum comparison finds missing kernels or mismatches.",
+    )
     ap.add_argument("--out-dir", default=str(GENERATED_DIR), help="Generated artifacts root")
     ap.add_argument("--verbose", "-v", action="store_true")
     args = ap.parse_args(argv)
@@ -497,6 +697,8 @@ def main(argv: list[str]) -> int:
         raise SystemExit("error: iterations/len values must be > 0")
     if not ANALYZE_SCRIPT.exists():
         raise SystemExit(f"error: missing analyzer: {ANALYZE_SCRIPT}")
+    if not COMPARE_SCRIPT.exists():
+        raise SystemExit(f"error: missing checksum comparator: {COMPARE_SCRIPT}")
     if not FREESTANDING_INCLUDE.exists():
         raise SystemExit(f"error: missing freestanding include tree: {FREESTANDING_INCLUDE}")
 
@@ -530,6 +732,8 @@ def main(argv: list[str]) -> int:
         if not qemu:
             raise SystemExit("error: qemu-system-linx64 not found; set --qemu or QEMU")
         _check_exe(qemu, "qemu-system-linx64")
+    if args.compare_baseline_log and args.no_run_qemu:
+        raise SystemExit("error: --compare-baseline-log requires QEMU execution")
 
     tsvc_src = _resolve_tsvc_src(args.tsvc_src)
     required = ["common.h", "tsvc.c", "common.c", "dummy.c", "array_defs.h"]
@@ -547,13 +751,14 @@ def main(argv: list[str]) -> int:
     for d in (build_dir, elf_dir, objdump_dir, qemu_dir, reports_dir):
         d.mkdir(parents=True, exist_ok=True)
 
-    kernels = _stage_tsvc_sources(
+    kernels, source_canonicalizations = _stage_tsvc_sources(
         src_dir=tsvc_src,
         stage_dir=stage_dir,
         iterations=args.iterations,
         len_1d=args.len_1d,
         len_2d=args.len_2d,
         kernel_regex=args.kernel_regex,
+        source_policy=args.source_policy,
     )
     kernel_list_path = reports_dir / "kernel_list.txt"
     kernel_list_path.write_text("\n".join(kernels) + "\n", encoding="utf-8")
@@ -637,6 +842,7 @@ def main(argv: list[str]) -> int:
         qemu_stdout = None
         qemu_stderr = None
         observed_kernels = None
+        checksum_by_kernel: dict[str, str] | None = None
         if not args.no_run_qemu:
             qemu_stdout = qemu_dir / f"tsvc.{mode}.stdout.txt"
             qemu_stderr = qemu_dir / f"tsvc.{mode}.stderr.txt"
@@ -700,6 +906,7 @@ def main(argv: list[str]) -> int:
             gap_plan_json=gap_plan_json,
             vectorized_kernels=vectorized,
             total_kernels=len(kernels),
+            checksums=checksum_by_kernel,
         )
 
     selected_mode = "auto" if "auto" in results else modes[-1]
@@ -727,11 +934,88 @@ def main(argv: list[str]) -> int:
             encoding="utf-8",
         )
 
+    checksum_payload: dict[str, object] | None = None
+    checksum_report_json: Path | None = None
+    checksum_report_md: Path | None = None
+    if args.compare_baseline_log:
+        if args.no_run_qemu or not selected.qemu_stdout:
+            raise SystemExit("error: checksum comparison requires selected QEMU stdout")
+        baseline_log = Path(os.path.expanduser(args.compare_baseline_log)).resolve()
+        checksum_report_json = (
+            Path(os.path.expanduser(args.checksum_report_json)).resolve()
+            if args.checksum_report_json
+            else reports_dir / f"checksum_compare.{selected_mode}.json"
+        )
+        checksum_report_md = checksum_report_json.with_suffix(".md")
+        checksum_payload = _run_checksum_compare(
+            python=python,
+            baseline=baseline_log,
+            candidate=selected.qemu_stdout,
+            kernel_list=kernel_list_path,
+            json_out=checksum_report_json,
+            report_out=checksum_report_md,
+            fail_on_mismatch=args.fail_on_checksum_mismatch,
+            verbose=args.verbose,
+        )
+
+    gate_payload = {
+        "generated_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "tool": "workloads/tsvc/run_tsvc.py",
+        "command": " ".join([shlex.quote(sys.executable or "python3"), "workloads/tsvc/run_tsvc.py", *[shlex.quote(a) for a in argv]]),
+        "mode_selected": selected_mode,
+        "vector_modes_run": modes,
+        "source_policy": args.source_policy,
+        "source_canonicalizations": source_canonicalizations,
+        "profile": {
+            "iterations": args.iterations,
+            "len_1d": args.len_1d,
+            "len_2d": args.len_2d,
+            "is_canonical": (
+                args.iterations == _CANONICAL_ITERATIONS
+                and args.len_1d == _CANONICAL_LEN_1D
+                and args.len_2d == _CANONICAL_LEN_2D
+            ),
+        },
+        "lane_policy": args.lane_policy,
+        "resolved_lanes": {
+            "clang": _classify_lane(clang),
+            "lld": _classify_lane(lld),
+            "qemu": _classify_lane(qemu),
+        },
+        "executables": {
+            "clang": str(clang),
+            "lld": str(lld),
+            "llvm_objdump": str(llvm_objdump),
+            "qemu": str(qemu) if qemu else None,
+        },
+        "sha_manifest": _build_sha_manifest(),
+        "target": args.target,
+        "kernel_count": len(kernels),
+        "selected_artifacts": {
+            "elf": str(selected.elf),
+            "objdump": str(selected.objdump),
+            "qemu_stdout": str(selected.qemu_stdout) if selected.qemu_stdout else None,
+            "qemu_stderr": str(selected.qemu_stderr) if selected.qemu_stderr else None,
+            "coverage_json": str(selected.coverage_json),
+            "remarks_json": str(selected.remarks_summary_json),
+            "gap_plan_json": str(selected.gap_plan_json),
+        },
+        "coverage": json.loads(selected.coverage_json.read_text(encoding="utf-8")),
+        "checksum_compare": checksum_payload,
+    }
+    gate_json_mode = reports_dir / f"gate_result.{selected_mode}.json"
+    gate_json_latest = reports_dir / "gate_result.json"
+    gate_json_mode.write_text(json.dumps(gate_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    gate_json_latest.write_text(gate_json_mode.read_text(encoding="utf-8"), encoding="utf-8")
+
     summary = [
         "# TSVC auto-vectorization report",
         "",
         f"- Source: `{tsvc_src}`",
+        f"- Source policy: `{args.source_policy}`",
         f"- Profile: `iterations={args.iterations}`, `LEN_1D={args.len_1d}`, `LEN_2D={args.len_2d}`",
+        f"- Canonical profile: `{'yes' if (args.iterations == _CANONICAL_ITERATIONS and args.len_1d == _CANONICAL_LEN_1D and args.len_2d == _CANONICAL_LEN_2D) else 'no'}`",
+        f"- Lane policy: `{args.lane_policy}`",
         f"- Modes run: `{', '.join(modes)}`",
         f"- QEMU executed: `{'no' if args.no_run_qemu else 'yes'}`",
         "",
@@ -754,6 +1038,7 @@ def main(argv: list[str]) -> int:
             f"- Coverage JSON: `{reports_dir / 'vectorization_coverage.json'}`",
             f"- Remarks JSON: `{reports_dir / 'vectorization_remarks.json'}`",
             f"- Gap plan JSON: `{reports_dir / 'vectorization_gap_plan.json'}`",
+            f"- Gate JSON: `{gate_json_latest}`",
             f"- Kernel objdumps: `{objdump_dir / 'kernels' / selected_mode}`",
         ]
     )
@@ -762,6 +1047,14 @@ def main(argv: list[str]) -> int:
             [
                 f"- QEMU stdout: `{selected.qemu_stdout}`",
                 f"- QEMU stderr: `{selected.qemu_stderr}`",
+            ]
+        )
+    if checksum_payload is not None and checksum_report_json and checksum_report_md:
+        summary.extend(
+            [
+                f"- Checksum compare JSON: `{checksum_report_json}`",
+                f"- Checksum compare report: `{checksum_report_md}`",
+                f"- Checksum mismatches: `{int(checksum_payload.get('checksum_mismatch_count', 0))}`",
             ]
         )
     (out_root / "tsvc_report.md").write_text("\n".join(summary) + "\n", encoding="utf-8")
