@@ -6,7 +6,7 @@
 [submodule "kernel/linux"]
 	path = kernel/linux
 	url = https://github.com/LinxISA/linux.git
-	branch = master
+	branch = main
 	update = checkout
 	ignore = dirty
 [submodule "emulator/qemu"]
