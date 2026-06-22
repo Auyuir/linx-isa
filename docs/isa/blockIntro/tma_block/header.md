@@ -58,7 +58,8 @@ Among them, the function field is used to encode specific TileOp information. Th
 | 5 | [MSCATTER](../../header/tileblock/MSCATTER.md) | Store the data in the Tile register into discrete memory space.  |
 | 6 | [MGATHER.MASK](../../header/tileblock/MGATHER.MASK.md) | Masked memory gather. Reads only lanes whose mask bit is set. |
 | 7 | [MSCATTER.MASK](../../header/tileblock/MSCATTER.MASK.md) | Masked memory scatter. Writes only lanes whose mask bit is set. |
-| 8-31 | Temporarily reserved |
+| 8 | [MGATHER.CAS](../../header/tileblock/MGATHER.CAS.md) | Atomic compare-and-swap gather. Per-element atomic CAS from memory to Tile. |
+| 9-31 | Temporarily reserved |
 
 The DataType field is encoded as follows:
 

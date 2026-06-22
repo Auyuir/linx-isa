@@ -60,7 +60,8 @@ TileOp <LB0:arg0, LB1:arg1, LB2:arg2, DataType>, SrcTile0<.reuse>, ..., SrcTile7
 | 5 | [MSCATTER](../../header/tileblock/MSCATTER.md) | 将Tile寄存器中的数据存储到离散的内存空间。  |
 | 6 | [MGATHER.MASK](../../header/tileblock/MGATHER.MASK.md) | 带掩码的内存聚集，仅当 MaskTile 中对应标志位为 1 时才执行聚集。 |
 | 7 | [MSCATTER.MASK](../../header/tileblock/MSCATTER.MASK.md) | 带掩码的内存分散，仅当 MaskTile 中对应标志位为 1 时才执行分散。 |
-| 8-31 | 暂时保留 |
+| 8 | [MGATHER.CAS](../../header/tileblock/MGATHER.CAS.md) | 原子比较-交换内存聚集。逐元素原子 CAS 从内存聚集到 Tile。 |
+| 9-31 | 暂时保留 |
 
 DataType字段编码方式如下：
 
