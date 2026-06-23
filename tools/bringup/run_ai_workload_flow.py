@@ -1438,6 +1438,460 @@ extern "C" __attribute__((noreturn, section(".text._start"))) void _start(void) 
   linx_pto_exit(static_cast<unsigned int>(main()));
 }
 """
+PTO_HASH_TABLE_INSERT_F32_HARNESS_SOURCE = r"""extern "C" void hash_table_insert_f32(int *table_keys_ptr, float *table_values_ptr, int table_size, int *keys_ptr, float *values_ptr, int n);
+
+namespace {
+
+constexpr int kTableSize = 8;
+constexpr int kElems = 5;
+
+int table_keys[kTableSize];
+float table_values[kTableSize];
+int keys[kElems];
+float values[kElems];
+
+static inline float f32_from_u32(unsigned int value) {
+  return static_cast<float>(static_cast<int>(value));
+}
+
+static inline int initial_key(int i) {
+  constexpr int kInitial[kTableSize] = {-1, 7, -1, 11, -1, -1, 5, -1};
+  return kInitial[i];
+}
+
+static inline unsigned int initial_value(int i) {
+  constexpr unsigned int kInitial[kTableSize] = {0, 70, 0, 110, 0, 0, 50, 0};
+  return kInitial[i];
+}
+
+static inline int input_key(int i) {
+  constexpr int kKeys[kElems] = {3, 7, 12, 5, 19};
+  return kKeys[i];
+}
+
+static inline unsigned int input_value(int i) {
+  constexpr unsigned int kValues[kElems] = {30, 71, 120, 51, 190};
+  return kValues[i];
+}
+
+static inline int expected_key(int i) {
+  constexpr int kExpected[kTableSize] = {3, 7, 12, 11, 19, -1, 5, -1};
+  return kExpected[i];
+}
+
+static inline unsigned int expected_value(int i) {
+  constexpr unsigned int kExpected[kTableSize] = {30, 71, 120, 110, 190, 0, 51, 0};
+  return kExpected[i];
+}
+
+static inline __attribute__((noreturn)) void linx_pto_exit(unsigned int code) {
+  if (code == 0) {
+    __asm__ volatile(
+        "BSTART.STD\n"
+        "lui 65545, ->u\n"
+        "lui 5, ->t\n"
+        "addi t#1, 1365, ->t\n"
+        "c.swi t#1, [u#1, 0]\n"
+        "BSTOP\n"
+        ::: "memory");
+  } else {
+    __asm__ volatile(
+        "BSTART.STD\n"
+        "lui 65545, ->u\n"
+        "lui 19, ->t\n"
+        "addi t#1, 819, ->t\n"
+        "c.swi t#1, [u#1, 0]\n"
+        "BSTOP\n"
+        ::: "memory");
+  }
+  while (1) {
+    __asm__ volatile("" ::: "memory");
+  }
+}
+
+} // namespace
+
+int main() {
+  for (int i = 0; i < kTableSize; ++i) {
+    table_keys[i] = initial_key(i);
+    table_values[i] = f32_from_u32(initial_value(i));
+  }
+  for (int i = 0; i < kElems; ++i) {
+    keys[i] = input_key(i);
+    values[i] = f32_from_u32(input_value(i));
+  }
+
+  hash_table_insert_f32(table_keys, table_values, kTableSize, keys, values, kElems);
+
+  for (int i = 0; i < kTableSize; ++i) {
+    if (table_keys[i] != expected_key(i) ||
+        table_values[i] != f32_from_u32(expected_value(i))) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+extern "C" __attribute__((noreturn, section(".text._start"))) void _start(void) {
+  linx_pto_exit(static_cast<unsigned int>(main()));
+}
+"""
+PTO_HASH_TABLE_LOOKUP_F32_HARNESS_SOURCE = r"""extern "C" void hash_table_lookup_f32(float *out_values_ptr, int *keys_ptr, int *table_keys_ptr, float *table_values_ptr, int table_size, int nkeys);
+
+namespace {
+
+constexpr int kTableSize = 8;
+constexpr int kKeys = 6;
+
+int table_keys[kTableSize];
+float table_values[kTableSize];
+int keys[kKeys];
+float out_values[kKeys];
+
+static inline float f32_from_u32(unsigned int value) {
+  return static_cast<float>(static_cast<int>(value));
+}
+
+static inline int table_key(int i) {
+  constexpr int kTableKeys[kTableSize] = {3, 7, 12, 11, 19, -1, 5, -1};
+  return kTableKeys[i];
+}
+
+static inline unsigned int table_value(int i) {
+  constexpr unsigned int kTableValues[kTableSize] = {30, 71, 120, 110, 190, 0, 51, 0};
+  return kTableValues[i];
+}
+
+static inline int lookup_key(int i) {
+  constexpr int kLookup[kKeys] = {19, 5, 42, 3, 11, 8};
+  return kLookup[i];
+}
+
+static inline unsigned int expected_value(int i) {
+  constexpr unsigned int kExpected[kKeys] = {190, 51, 0, 30, 110, 0};
+  return kExpected[i];
+}
+
+static inline __attribute__((noreturn)) void linx_pto_exit(unsigned int code) {
+  if (code == 0) {
+    __asm__ volatile(
+        "BSTART.STD\n"
+        "lui 65545, ->u\n"
+        "lui 5, ->t\n"
+        "addi t#1, 1365, ->t\n"
+        "c.swi t#1, [u#1, 0]\n"
+        "BSTOP\n"
+        ::: "memory");
+  } else {
+    __asm__ volatile(
+        "BSTART.STD\n"
+        "lui 65545, ->u\n"
+        "lui 19, ->t\n"
+        "addi t#1, 819, ->t\n"
+        "c.swi t#1, [u#1, 0]\n"
+        "BSTOP\n"
+        ::: "memory");
+  }
+  while (1) {
+    __asm__ volatile("" ::: "memory");
+  }
+}
+
+} // namespace
+
+int main() {
+  for (int i = 0; i < kTableSize; ++i) {
+    table_keys[i] = table_key(i);
+    table_values[i] = f32_from_u32(table_value(i));
+  }
+  for (int i = 0; i < kKeys; ++i) {
+    keys[i] = lookup_key(i);
+    out_values[i] = f32_from_u32(999);
+  }
+
+  hash_table_lookup_f32(out_values, keys, table_keys, table_values, kTableSize, kKeys);
+
+  for (int i = 0; i < kKeys; ++i) {
+    if (out_values[i] != f32_from_u32(expected_value(i))) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+extern "C" __attribute__((noreturn, section(".text._start"))) void _start(void) {
+  linx_pto_exit(static_cast<unsigned int>(main()));
+}
+"""
+PTO_UNSORTED_SEGMENT_SUM_F32_HARNESS_SOURCE = r"""extern "C" void unsorted_segment_sum_f32(float *out_ptr, int *segment_ids_ptr, float *data_ptr, int n, int num_segments);
+
+namespace {
+
+constexpr int kElems = 10;
+constexpr int kSegments = 4;
+
+float out_values[kSegments];
+int segment_ids[kElems];
+float data[kElems];
+
+static inline unsigned int f32_bits(float value) {
+  union {
+    float f;
+    unsigned int u;
+  } bits;
+  bits.f = value;
+  return bits.u;
+}
+
+static inline float f32_from_bits(unsigned int value) {
+  union {
+    unsigned int u;
+    float f;
+  } bits;
+  bits.u = value;
+  return bits.f;
+}
+
+static inline unsigned int f32_bits_from_u32(unsigned int value) {
+  if (value == 0) {
+    return 0;
+  }
+  int msb = 31;
+  while (((value >> msb) & 1U) == 0) {
+    --msb;
+  }
+  unsigned int mantissa = 0;
+  if (msb >= 23) {
+    mantissa = value >> (msb - 23);
+  } else {
+    mantissa = value << (23 - msb);
+  }
+  return (static_cast<unsigned int>(msb + 127) << 23) | (mantissa & 0x007fffffU);
+}
+
+static inline unsigned int u32_from_f32_bits(unsigned int bits) {
+  if ((bits & 0x7fffffffU) == 0) {
+    return 0;
+  }
+  const unsigned int exponent = (bits >> 23) & 0xffU;
+  const unsigned int mantissa = (bits & 0x007fffffU) | 0x00800000U;
+  const int shift = static_cast<int>(exponent) - 127 - 23;
+  return shift >= 0 ? (mantissa << shift) : (mantissa >> -shift);
+}
+
+static inline int segment_id(int i) {
+  constexpr int kIds[kElems] = {2, 0, 1, 2, -1, 1, 3, 0, 5, 2};
+  return kIds[i];
+}
+
+static inline unsigned int data_value(int i) {
+  return static_cast<unsigned int>(i + 1);
+}
+
+static inline unsigned int expected_value(int i) {
+  constexpr unsigned int kExpected[kSegments] = {10, 9, 15, 7};
+  return kExpected[i];
+}
+
+static inline __attribute__((noreturn)) void linx_pto_exit(unsigned int code) {
+  if (code == 0) {
+    __asm__ volatile(
+        "BSTART.STD\n"
+        "lui 65545, ->u\n"
+        "lui 5, ->t\n"
+        "addi t#1, 1365, ->t\n"
+        "c.swi t#1, [u#1, 0]\n"
+        "BSTOP\n"
+        ::: "memory");
+  } else {
+    __asm__ volatile(
+        "BSTART.STD\n"
+        "lui 65545, ->u\n"
+        "lui 19, ->t\n"
+        "addi t#1, 819, ->t\n"
+        "c.swi t#1, [u#1, 0]\n"
+        "BSTOP\n"
+        ::: "memory");
+  }
+  while (1) {
+    __asm__ volatile("" ::: "memory");
+  }
+}
+
+} // namespace
+
+extern "C" float __addsf3(float a, float b) {
+  const unsigned int a_int = u32_from_f32_bits(f32_bits(a));
+  const unsigned int b_int = u32_from_f32_bits(f32_bits(b));
+  return f32_from_bits(f32_bits_from_u32(a_int + b_int));
+}
+
+int main() {
+  for (int i = 0; i < kSegments; ++i) {
+    out_values[i] = f32_from_bits(f32_bits_from_u32(999));
+  }
+  for (int i = 0; i < kElems; ++i) {
+    segment_ids[i] = segment_id(i);
+    data[i] = f32_from_bits(f32_bits_from_u32(data_value(i)));
+  }
+
+  unsorted_segment_sum_f32(out_values, segment_ids, data, kElems, kSegments);
+
+  for (int i = 0; i < kSegments; ++i) {
+    if (f32_bits(out_values[i]) != f32_bits_from_u32(expected_value(i))) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+extern "C" __attribute__((noreturn, section(".text._start"))) void _start(void) {
+  linx_pto_exit(static_cast<unsigned int>(main()));
+}
+"""
+PTO_PERMUTE_NHWC_NCHW_F32_HARNESS_SOURCE = r"""extern "C" void permute_nhwc_nchw_f32(float *out_ptr, float *in_ptr, int n, int h, int w, int c);
+
+namespace {
+
+constexpr int kN = 2;
+constexpr int kH = 3;
+constexpr int kW = 4;
+constexpr int kC = 5;
+constexpr int kElems = kN * kH * kW * kC;
+
+float in_values[kElems];
+float out_values[kElems];
+
+static inline float input_value(int i) {
+  return static_cast<float>((i % 29) - 14);
+}
+
+static inline int src_index(int nn, int hh, int ww, int cc) {
+  return ((nn * kH + hh) * kW + ww) * kC + cc;
+}
+
+static inline int dst_index(int nn, int hh, int ww, int cc) {
+  return ((nn * kC + cc) * kH + hh) * kW + ww;
+}
+
+static inline __attribute__((noreturn)) void linx_pto_exit(unsigned int code) {
+  if (code == 0) {
+    __asm__ volatile(
+        "BSTART.STD\n"
+        "lui 65545, ->u\n"
+        "lui 5, ->t\n"
+        "addi t#1, 1365, ->t\n"
+        "c.swi t#1, [u#1, 0]\n"
+        "BSTOP\n"
+        ::: "memory");
+  } else {
+    __asm__ volatile(
+        "BSTART.STD\n"
+        "lui 65545, ->u\n"
+        "lui 19, ->t\n"
+        "addi t#1, 819, ->t\n"
+        "c.swi t#1, [u#1, 0]\n"
+        "BSTOP\n"
+        ::: "memory");
+  }
+  while (1) {
+    __asm__ volatile("" ::: "memory");
+  }
+}
+
+} // namespace
+
+int main() {
+  for (int i = 0; i < kElems; ++i) {
+    in_values[i] = input_value(i);
+    out_values[i] = -99.0f;
+  }
+
+  permute_nhwc_nchw_f32(out_values, in_values, kN, kH, kW, kC);
+
+  for (int nn = 0; nn < kN; ++nn) {
+    for (int hh = 0; hh < kH; ++hh) {
+      for (int ww = 0; ww < kW; ++ww) {
+        for (int cc = 0; cc < kC; ++cc) {
+          if (out_values[dst_index(nn, hh, ww, cc)] !=
+              in_values[src_index(nn, hh, ww, cc)]) {
+            return 1;
+          }
+        }
+      }
+    }
+  }
+  return 0;
+}
+
+extern "C" __attribute__((noreturn, section(".text._start"))) void _start(void) {
+  linx_pto_exit(static_cast<unsigned int>(main()));
+}
+"""
+PTO_TRANSPOSE_LARGE_F32_HARNESS_SOURCE = r"""extern "C" void transpose_large_f32(float *out_ptr, float *in_ptr, int rows, int cols);
+
+namespace {
+
+constexpr int kRows = 7;
+constexpr int kCols = 9;
+constexpr int kElems = kRows * kCols;
+
+float in_values[kElems];
+float out_values[kElems];
+
+static inline float input_value(int i) {
+  return static_cast<float>((i % 31) - 15);
+}
+
+static inline __attribute__((noreturn)) void linx_pto_exit(unsigned int code) {
+  if (code == 0) {
+    __asm__ volatile(
+        "BSTART.STD\n"
+        "lui 65545, ->u\n"
+        "lui 5, ->t\n"
+        "addi t#1, 1365, ->t\n"
+        "c.swi t#1, [u#1, 0]\n"
+        "BSTOP\n"
+        ::: "memory");
+  } else {
+    __asm__ volatile(
+        "BSTART.STD\n"
+        "lui 65545, ->u\n"
+        "lui 19, ->t\n"
+        "addi t#1, 819, ->t\n"
+        "c.swi t#1, [u#1, 0]\n"
+        "BSTOP\n"
+        ::: "memory");
+  }
+  while (1) {
+    __asm__ volatile("" ::: "memory");
+  }
+}
+
+} // namespace
+
+int main() {
+  for (int i = 0; i < kElems; ++i) {
+    in_values[i] = input_value(i);
+    out_values[i] = -99.0f;
+  }
+
+  transpose_large_f32(out_values, in_values, kRows, kCols);
+
+  for (int r = 0; r < kRows; ++r) {
+    for (int c = 0; c < kCols; ++c) {
+      if (out_values[c * kRows + r] != in_values[r * kCols + c]) {
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+
+extern "C" __attribute__((noreturn, section(".text._start"))) void _start(void) {
+  linx_pto_exit(static_cast<unsigned int>(main()));
+}
+"""
 PTO_ADD_CUSTOM_F32_HARNESS_SOURCE = r"""#include <common/runtime/kernel_shapes.hpp>
 
 extern "C" void add_custom_f32(float *x_ptr, float *y_ptr, float *z_ptr);
@@ -1614,6 +2068,26 @@ PTO_HARNESS_SOURCES: dict[str, tuple[str, str]] = {
     "where_f32": ("pto-where-f32-harness.cpp", PTO_WHERE_F32_HARNESS_SOURCE),
     "argmax_f32": ("pto-argmax-f32-harness.cpp", PTO_ARGMAX_F32_HARNESS_SOURCE),
     "unique_i32": ("pto-unique-i32-harness.cpp", PTO_UNIQUE_I32_HARNESS_SOURCE),
+    "hash_table_insert_f32": (
+        "pto-hash-table-insert-f32-harness.cpp",
+        PTO_HASH_TABLE_INSERT_F32_HARNESS_SOURCE,
+    ),
+    "hash_table_lookup_f32": (
+        "pto-hash-table-lookup-f32-harness.cpp",
+        PTO_HASH_TABLE_LOOKUP_F32_HARNESS_SOURCE,
+    ),
+    "unsorted_segment_sum_f32": (
+        "pto-unsorted-segment-sum-f32-harness.cpp",
+        PTO_UNSORTED_SEGMENT_SUM_F32_HARNESS_SOURCE,
+    ),
+    "permute_nhwc_nchw_f32": (
+        "pto-permute-nhwc-nchw-f32-harness.cpp",
+        PTO_PERMUTE_NHWC_NCHW_F32_HARNESS_SOURCE,
+    ),
+    "transpose_large_f32": (
+        "pto-transpose-large-f32-harness.cpp",
+        PTO_TRANSPOSE_LARGE_F32_HARNESS_SOURCE,
+    ),
     "add_custom_f32": (
         "pto-add-custom-f32-harness.cpp",
         PTO_ADD_CUSTOM_F32_HARNESS_SOURCE,
@@ -1683,12 +2157,40 @@ PTO_STANDALONE_HARNESSES: dict[str, dict[str, Any]] = {
         "expected": "PTO stack_f32 standalone smoke ELF passes QEMU then gfsim",
         "description": "PTO catalog float32 stack direct-boot smoke harness",
     },
+    "layout/permute_nhwc_nchw_fp32.cpp": {
+        "standalone_harness": "permute_nhwc_nchw_f32",
+        "harness_profile": "qemu_smoke",
+        "compile_defines": ["-DPTO_QEMU_SMOKE=1"],
+        "expected": "PTO permute_nhwc_nchw_f32 standalone smoke ELF passes QEMU then gfsim",
+        "description": "PTO catalog float32 NHWC-to-NCHW permute direct-boot smoke harness",
+    },
+    "layout/transpose_large_fp32.cpp": {
+        "standalone_harness": "transpose_large_f32",
+        "harness_profile": "qemu_smoke",
+        "compile_defines": ["-DPTO_QEMU_SMOKE=1"],
+        "expected": "PTO transpose_large_f32 standalone smoke ELF passes QEMU then gfsim",
+        "description": "PTO catalog float32 large transpose direct-boot smoke harness",
+    },
     "indexing/argmax_fp32.cpp": {
         "standalone_harness": "argmax_f32",
         "harness_profile": "qemu_smoke",
         "compile_defines": ["-DPTO_QEMU_SMOKE=1"],
         "expected": "PTO argmax_f32 standalone smoke ELF passes QEMU then gfsim",
         "description": "PTO catalog float32 argmax model-lane maturity harness",
+    },
+    "indexing/hash_table_insert_fp32.cpp": {
+        "standalone_harness": "hash_table_insert_f32",
+        "harness_profile": "qemu_smoke",
+        "compile_defines": ["-DPTO_QEMU_SMOKE=1"],
+        "expected": "PTO hash_table_insert_f32 standalone smoke ELF passes QEMU then gfsim",
+        "description": "PTO catalog float32 hash-table insert direct-boot smoke harness",
+    },
+    "indexing/hash_table_lookup_fp32.cpp": {
+        "standalone_harness": "hash_table_lookup_f32",
+        "harness_profile": "qemu_smoke",
+        "compile_defines": ["-DPTO_QEMU_SMOKE=1"],
+        "expected": "PTO hash_table_lookup_f32 standalone smoke ELF passes QEMU then gfsim",
+        "description": "PTO catalog float32 hash-table lookup direct-boot smoke harness",
     },
     "indexing/gather_fp32.cpp": {
         "standalone_harness": "gather_f32",
@@ -1717,6 +2219,13 @@ PTO_STANDALONE_HARNESSES: dict[str, dict[str, Any]] = {
         "compile_defines": ["-DPTO_QEMU_SMOKE=1"],
         "expected": "PTO unique_i32 standalone smoke ELF passes QEMU then gfsim",
         "description": "PTO catalog int32 unique model-lane maturity harness",
+    },
+    "indexing/unsorted_segment_sum_fp32.cpp": {
+        "standalone_harness": "unsorted_segment_sum_f32",
+        "harness_profile": "qemu_smoke",
+        "compile_defines": ["-DPTO_QEMU_SMOKE=1"],
+        "expected": "PTO unsorted_segment_sum_f32 standalone smoke ELF passes QEMU then gfsim",
+        "description": "PTO catalog float32 unsorted segment sum direct-boot smoke harness",
     },
     "indexing/where_fp32.cpp": {
         "standalone_harness": "where_f32",
@@ -2050,35 +2559,66 @@ def _norm_key(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", text.lower())
 
 
+def supernpu_source_keys(make_vars: dict[str, str]) -> list[str]:
+    keys: list[str] = []
+    for name in ("TYPE", "TESTCASE"):
+        value = make_vars.get(name, "").strip()
+        if value and value not in keys:
+            keys.append(value)
+    return keys
+
+
+def existing_path_with_actual_case(candidate: Path) -> Path | None:
+    if not candidate.exists():
+        return None
+    parent = candidate.parent
+    if not parent.exists():
+        return candidate
+    for child in parent.iterdir():
+        if child.name == candidate.name:
+            return child
+    norm_name = _norm_key(candidate.name)
+    matches = [child for child in parent.iterdir() if _norm_key(child.name) == norm_name]
+    if len(matches) == 1:
+        return matches[0]
+    return candidate
+
+
 def supernpu_source_paths(suite_dir: Path, make_vars: dict[str, str]) -> list[Path]:
-    testcase = make_vars["TESTCASE"]
-    candidates = [
-        suite_dir / "src" / f"{testcase}.cpp",
-        suite_dir / testcase / f"{testcase}.cpp",
-        suite_dir / f"{testcase}.cpp",
-    ]
+    source_keys = supernpu_source_keys(make_vars)
+    candidates = []
+    for key in source_keys:
+        candidates.extend(
+            [
+                suite_dir / "src" / f"{key}.cpp",
+                suite_dir / key / f"{key}.cpp",
+                suite_dir / f"{key}.cpp",
+            ]
+        )
     for candidate in candidates:
-        if candidate.exists():
-            return [candidate]
+        existing = existing_path_with_actual_case(candidate)
+        if existing is not None:
+            return [existing]
 
     cpp_files = sorted(suite_dir.rglob("*.cpp"))
-    testcase_key = _norm_key(testcase)
-    matching = [
-        path
-        for path in cpp_files
-        if _norm_key(path.stem) == testcase_key
-        or _norm_key(path.stem) in testcase_key
-        or testcase_key in _norm_key(path.stem)
-    ]
-    if matching:
-        return [matching[0]]
+    for source_key in source_keys:
+        norm_source_key = _norm_key(source_key)
+        matching = [
+            path
+            for path in cpp_files
+            if _norm_key(path.stem) == norm_source_key
+            or _norm_key(path.stem) in norm_source_key
+            or norm_source_key in _norm_key(path.stem)
+        ]
+        if matching:
+            return [matching[0]]
 
     src_dir = suite_dir / "src"
     src_cpp_files = sorted(src_dir.rglob("*.cpp")) if src_dir.exists() else []
     if len(src_cpp_files) == 1:
         return [src_cpp_files[0]]
 
-    return [candidates[0]]
+    return [suite_dir / "src" / f"{make_vars['TESTCASE']}.cpp"]
 
 
 def snapshot_elf_mtimes(elf_dir: Path) -> dict[Path, float]:
@@ -2771,6 +3311,8 @@ def classify_supernpu_compile_failure(log_path: Path) -> tuple[str, str]:
         "-mlxbc",
         "-enable-all-vector-as-tilereg",
         "bits/alltypes.h",
+        "unknown target triple 'linx64v5'",
+        "fatal error: 'benchmark.h' file not found",
         "unknown type name '__half'",
         "use of undeclared identifier '__fp32'",
         "use of undeclared identifier '__tf32'",
@@ -2781,6 +3323,13 @@ def classify_supernpu_compile_failure(log_path: Path) -> tuple[str, str]:
     if any(marker in text for marker in source_markers):
         return "benchmark", "SuperNPUBench source/toolchain manifest mismatch"
     return "compiler", "SuperNPUBench compile failed"
+
+
+def classify_supernpu_missing_elf(log_path: Path, elf: Path) -> tuple[str, str]:
+    owner, evidence = classify_supernpu_compile_failure(log_path)
+    if owner == "benchmark":
+        return owner, evidence
+    return "compiler", f"expected ELF was not produced: {elf}"
 
 
 def classify_avs_compile_failure(log_path: Path) -> tuple[str, str]:
@@ -3113,7 +3662,7 @@ def compiler_contract(
                         artifacts["elf_source"] = str(elf)
                 if not dry_run and not elf.exists():
                     status = "fail"
-                    evidence = f"expected ELF was not produced: {elf}"
+                    owner, evidence = classify_supernpu_missing_elf(log_path, elf)
                 else:
                     copied = case_artifacts / f"{case.id}.elf"
                     copied.parent.mkdir(parents=True, exist_ok=True)
@@ -3729,7 +4278,10 @@ def write_fix_packets(out_dir: Path, states: list[CaseState]) -> list[dict[str, 
     packet_dir = out_dir / "fix-packets"
     rows: list[dict[str, Any]] = []
     for state in states:
+        packet_path = packet_dir / f"{state.case.id}.json"
         if not state.failure_stage:
+            if packet_path.exists():
+                packet_path.unlink()
             rows.append(
                 stage_row(
                     state,
@@ -3772,7 +4324,6 @@ def write_fix_packets(out_dir: Path, states: list[CaseState]) -> list[dict[str, 
             "artifacts": state.artifacts,
             "stage_rows": state.stages,
         }
-        packet_path = packet_dir / f"{case.id}.json"
         write_json(packet_path, packet)
         rows.append(
             stage_row(

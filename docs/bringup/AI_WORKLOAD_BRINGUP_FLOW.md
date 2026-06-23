@@ -77,14 +77,28 @@ The runner stops on the first red hard-break stage unless
   `cases/<case>/compiler/supernpu-output/`, links these as direct-boot Linx
   ELFs with `_start` first at `0x10000`, and copies the canonical ELF,
   objdump outputs, raw bin, and linker script into the compiler artifact
-  directory for QEMU/model triage. Current direct-boot green tileop cases are
+  directory for QEMU/model triage. Each `compile.all` case row must be a
+  concrete `make` command; do not leave shell-loop variables such as
+  `${num_col}` or `${debug}` in rows consumed by the runner. When `TESTCASE` is generic, such as
+  `kernel/gemm/matmul TESTCASE=matmul`, the source contract resolves concrete
+  sources from `TYPE` first (`A16W4.cpp`, `HiF4_HiF4.cpp`, etc.) and preserves
+  actual path casing in source manifests. Current direct-boot green tileop cases are
   `MatMul`, `MatMacc`, `test_MatMul`, `test_MatMacc`, `TAdd`, `TAbs`, `TCI`,
   `TCopyIn`, `TCopyOut`, `TCopy`, `TCvt`, `TExpandCol`, `TExpandRow`,
   `TExpandScalar`, `TReshape`, `TTrans`, `TPad`, `TRowMax`, `TRowMaxExpand`,
   `TRowSum`, `TRowSumExpand`, `TSub`, `TSubs`, `TAdd_mask`, `TAdds`, `TDiv`,
   `TDivs`, `TExp`, `TRem`, `TRecip`, `TSqrt`, `TMul`, `TMuls`, `TMax`, `TMaxs`,
-  `TAnd`, `TOr`, and `TCmp`; keep future promotions similarly bounded and
-  prove each exact case through QEMU and `gfsim -f <elf>`. `MatMacc` is currently a
+  `TAnd`, `TOr`, `TCmp`, and `kernel/control hashtable_lookup_simt`; keep
+  future promotions similarly bounded and prove each exact case through QEMU
+  and `gfsim -f <elf>`. `hashtable_lookup_simt` currently has two bounded
+  `kNum=16` embedded-data direct smokes over the generated 2048-entry table:
+  `LINX_HT_SCAN=1` for the linear-scan fallback and `LINX_HT_DIRECT=1` without
+  scan for the real MurmurHash3 initial-slot plus linear-probe path. Keep both
+  promoted through QEMU and `gfsim`; the hash/probe case is the regression for
+  model W-form logical-right-shift semantics.
+  Keep SuperNPUBench control data-object rows with explicit no-op generated
+  object targets so redirected `OBJ_ROOT` runs do not rebuild `.s` files with a
+  host/default assembler. `MatMacc` is currently a
   bounded `4x4` int64 row-major multiply-accumulate smoke; col-major MatMacc
   has QEMU-pass/model-fail evidence and remains a model-lane maturity packet.
   `test_MatMul` is currently a bounded `4x4` int64 row-major MATMUL smoke;
@@ -102,23 +116,33 @@ The runner stops on the first red hard-break stage unless
   evidence. `TExp` is currently a bounded `4x4` int64 rounded-exp
   direct-boot smoke using a comparison ladder; float/half exponential and
   compiler-generated constant-table paths remain deferred until the model lane
-  has matching evidence.
+  has matching evidence. SuperNPUBench `kernel/gemm/matmul` `TYPE=A16W4` and
+  `TYPE=HIF4_HIF4` currently reach source-contract pass and model-build-smoke pass,
+  then fail the compiler-contract as benchmark-owned maturity packets because
+  their MX path still depends on vector-only `template_asm.h` `Tr` constraints
+  and `blkv_get_*` launch helpers. Do not reclassify these as compiler failures
+  unless a Linx direct-boot MX API contract exists and the same source still
+  fails in LLVM/MC/link.
 - `pto_kernel`: cataloged PTO kernel sources. Most entries currently
   participate in source and compile/static stages only; an ABI-specific
   standalone ELF harness is required before they can enter QEMU/model stages
   individually. Current promoted catalog smokes are `pto-kernel-tload_store`,
   `pto-kernel-gemm`, `pto-kernel-gemm_basic`, `pto-kernel-gemm_demo`,
-  `pto-kernel-gemm_performance`, `pto-kernel-mamulb`,
-  `pto-kernel-tmatmul_acc`, and `pto-kernel-relu_fp32` in Tier 1, plus the
-  Tier-2 layout-copy cases
+  `pto-kernel-gemm_performance`, `pto-kernel-gemm_reuse_a_fp16`,
+  `pto-kernel-gemm_reuse_b_fp16`, `pto-kernel-gemm_reuse_ab_fp16`,
+  `pto-kernel-mamulb`, `pto-kernel-tmatmul_acc`, `pto-kernel-relu_fp32`, and
+  `pto-kernel-add_custom` in Tier 1, plus the Tier-2 layout cases
   `pto-kernel-flatten_fp32`, `pto-kernel-reshape_fp32`,
   `pto-kernel-squeeze_fp32`, `pto-kernel-unsqueeze_fp32`,
   `pto-kernel-concat_fp32`, `pto-kernel-split_fp32`,
-  `pto-kernel-stack_fp32`, and the Tier-2 indexing cases
+  `pto-kernel-stack_fp32`, `pto-kernel-permute_nhwc_nchw_fp32`, and
+  `pto-kernel-transpose_large_fp32`, plus the Tier-2 indexing cases
   `pto-kernel-slice_fp32`, `pto-kernel-gather_fp32`,
   `pto-kernel-scatter_fp32`, `pto-kernel-where_fp32`,
-  `pto-kernel-argmax_fp32`, `pto-kernel-unique_i32`, and
-  `pto-kernel-add_custom`: the
+  `pto-kernel-argmax_fp32`, `pto-kernel-unique_i32`,
+  `pto-kernel-hash_table_insert_fp32`,
+  `pto-kernel-hash_table_lookup_fp32`, and
+  `pto-kernel-unsorted_segment_sum_fp32`: the
   runner generates per-case harnesses, compiles the matching source with
   `-DPTO_QEMU_SMOKE=1`, emits direct-boot Linx ELFs plus objdump/raw-bin side
   artifacts, then promotes each passing ELF through QEMU and
@@ -126,7 +150,9 @@ The runner stops on the first red hard-break stage unless
   parity/model maturity suites until each catalog kernel has its own full-shape
   harness and oracle. `pto-kernel-add_custom` uses a harness-local freestanding
   `__addsf3` helper scoped to the positive integer-valued smoke inputs seeded by
-  the oracle; do not treat that helper as a general compiler-rt replacement.
+  the oracle; `pto-kernel-unsorted_segment_sum_fp32` uses the same scoped helper
+  for positive integer-valued smoke additions. Do not treat either helper as a
+  general compiler-rt replacement.
   `pto-kernel-gemm_basic`, `pto-kernel-gemm_demo`, and
   `pto-kernel-gemm_performance` use float bit-pattern copy-oracle harnesses for
   their `PTO_QEMU_SMOKE` branches; `gemm_performance` keeps `repeat_tiles=3`
@@ -135,13 +161,12 @@ The runner stops on the first red hard-break stage unless
   parity/model suites. `pto-kernel-gemm_reuse_a_fp16`,
   `pto-kernel-gemm_reuse_b_fp16`, and `pto-kernel-gemm_reuse_ab_fp16` now have
   direct-boot FP16 storage harnesses with harness-local positive-integer
-  `__mulsf3`/`__addsf3` shims. These cases pass source, compiler, and QEMU at
-  the default `PTO_QEMU_SMOKE=1` 16x16x16 shape, then fail in `gfsim` with
-  model-owned fix packets; do not list them as promoted final-green until the
-  model reaches the finisher. The PTO sources accept `PTO_QEMU_SMOKE_DIM` for
-  controlled future probes, but the runner keeps the default 16x16x16 shape
-  because smaller override probes must first prove the same QEMU oracle
-  behavior.
+  `__mulsf3`/`__addsf3` shims. These cases pass source, compiler, QEMU, and
+  `gfsim -f <elf>` at the default `PTO_QEMU_SMOKE=1` 16x16x16 shape when the AI
+  flow uses `--model-timeout 600`. The PTO sources accept
+  `PTO_QEMU_SMOKE_DIM` for controlled future probes, but the runner keeps the
+  default 16x16x16 shape because smaller override probes must first prove the
+  same QEMU oracle behavior.
 
 ## Owner Classification
 
@@ -150,14 +175,25 @@ The first failing boundary assigns the fix lane:
 - `benchmark`: source, manifest, API, or workload normalization failure.
   SuperNPUBench compiler-stage logs are still benchmark-owned when they show a
   missing Linx tile API implementation such as `*_Impl`, unsupported Linx tile
-  runtime contracts such as vector-kernel syntax or boxed layouts, or
+  runtime contracts such as vector-kernel syntax, `Tr` asm constraints,
+  `blkv_get_*`, or boxed layouts, or
   direct-boot source paths that still depend on host libc/soft-float symbols.
+  If a SuperNPUBench `make` invocation exits successfully but no ELF appears,
+  inspect the compile log before assigning compiler ownership: stale data-object
+  assembly paths that still target `linx64v5`, or source manifests that still
+  require missing benchmark-only headers such as `benchmark.h`, are
+  benchmark/source-contract failures. SuperNPUBench `compile.all` rows that
+  contain unexpanded shell variables are also benchmark/source-contract failures,
+  because the AI flow treats those rows as machine-readable case manifests.
 - `compiler`: clang, LLVM backend, MC, link, entry symbol, relocation, or retired-token static failure.
 - `emulator`: legal compiler output fails under QEMU.
 - `model`: QEMU-passing ELF fails to build, load, decode, execute, or match digest evidence in `gfsim`.
   For scalar or vector select divergence around `csel`/`psel`, the model must
   match the LLVM/QEMU contract: `SrcP != 0` selects `SrcR`; `SrcP == 0` selects
-  `SrcL`.
+  `SrcL`. For `kernel/control hashtable_lookup_simt`, QEMU-passing MurmurHash3
+  probe loops that fail only in `gfsim` should first check W-form scalar
+  arithmetic, especially `SRLW`/`SRLIW`: use `SrcL[31:0]`, a 5-bit shift
+  amount, and sign-extend the 32-bit result.
 - `docs-skills`: the run exposes a reusable contract, command, or triage rule not covered by docs/skills.
 
 Each failed case gets a JSON packet under `fix-packets/` with owner, evidence,
